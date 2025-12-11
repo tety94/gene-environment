@@ -6,7 +6,12 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import NearestNeighbors
 import statsmodels.formula.api as smf
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from db import gene_already_done, save_gene_iteration, save_gene_result
+from db import gene_already_done, load_gene_results, save_gene_result
+from tqdm import tqdm
+import numpy as np
+import matplotlib.pyplot as plt
+from statsmodels.stats.multitest import multipletests
+import os
 
 # ---------------- CONFIG ----------------
 raw_file = "gen_diminuito.csv"
@@ -22,7 +27,7 @@ random_state = 42
 standardize = True
 min_treated = 5
 min_sample_size = 10
-max_workers = 12
+max_workers = 8
 TEMP_DF_PATH = "temp_df.pkl"
 # number of matched controls per treated unit
 match_k = 3
@@ -135,45 +140,6 @@ def _find_interaction_term(mod_params_index, gene_col):
     return None
 
 
-def permutation_test_interaction(df, formula, gene_col, interaction_name, n_perm=5000, save_iter=False, gene_original=None, seed=42):
-    """
-    Performs a permutation test on the interaction coefficient. Optionally saves each permutation iteration via save_gene_iteration.
-
-    Returns: (beta_obs, p_value, perm_coefs_array)
-    """
-    # observed model
-    mod_obs = smf.ols(formula=formula, data=df).fit()
-    beta_obs = mod_obs.params.get(interaction_name, np.nan)
-
-    perm_coefs = []
-    rng = np.random.RandomState(seed)
-
-    for i in range(n_perm):
-        df_perm = df.copy()
-        df_perm[gene_col] = rng.permutation(df_perm[gene_col].values)
-
-        try:
-            mod_perm = smf.ols(formula=formula, data=df_perm).fit()
-            perm_beta = mod_perm.params.get(interaction_name, np.nan)
-        except Exception:
-            perm_beta = np.nan
-
-        perm_coefs.append(perm_beta)
-
-        if save_iter and gene_original is not None:
-            try:
-                # p-value not meaningful per iteration; store coef and sample size
-                save_gene_iteration(gene_original, i, float(perm_beta) if not np.isnan(perm_beta) else None, None, df_perm.shape[0])
-            except Exception:
-                pass
-
-    perm_coefs = np.array([x for x in perm_coefs if not np.isnan(x)])
-    p_value = float(np.mean(np.abs(perm_coefs) >= np.abs(beta_obs))) if perm_coefs.size > 0 and not np.isnan(beta_obs) else None
-
-    return float(beta_obs) if not np.isnan(beta_obs) else None, p_value, perm_coefs
-
-
-# ------------ PROCESSA UN GENE (NEI PROCESSI PARALLELI) ------------
 def process_single_gene(gene_col, gene_original, Ecols):
 
     print(f"[START] {gene_original}")
@@ -206,7 +172,8 @@ def process_single_gene(gene_col, gene_original, Ecols):
     # ---------- MATCHING ----------
     cov_match = Ecols + covariates
     try:
-        matched = match_control_units(df_model, gene_col, k=match_k, covariates_for_matching=cov_match)
+        # matched = match_control_units(df_model, gene_col, k=match_k, covariates_for_matching=cov_match)
+        matched = load_or_compute_matched(df_model, gene_col, gene_original, match_k, cov_match) #caching
     except Exception as e:
         print(f"[MATCH ERROR] {gene_original}: {e}")
         return None
@@ -233,15 +200,17 @@ def process_single_gene(gene_col, gene_original, Ecols):
     seed = random_state + (abs(hash(gene_col)) % 2_000_000)
     try:
         beta_obs, p_emp, perm_coefs = permutation_test_interaction(
-            matched,
-            formula,
+            df,  # dataset originale
             gene_col,
-            interaction_name,
+            build_formula,
+            onset_col,
+            Ecols,
+            covariates,
+            match_k,
             n_perm=n_perm,
-            save_iter=False,
-            gene_original=gene_original,
             seed=seed,
         )
+
     except Exception as e:
         print(f"[PERM ERROR] {gene_original}: {e}")
         beta_obs, p_emp, perm_coefs = obs_coef, None, np.array([])
@@ -256,13 +225,100 @@ def process_single_gene(gene_col, gene_original, Ecols):
             float(np.mean(perm_coefs)) if perm_coefs.size > 0 else None,
             float(np.std(perm_coefs)) if perm_coefs.size > 0 else None,
             p_emp,
-            None,
         )
     except Exception as e:
         print(f"[SAVE ERROR] {gene_original}: {e}")
 
+    cache_file = f"matched_{gene_col}.pkl"
+    if os.path.exists(cache_file):
+        os.remove(cache_file)
+        print(f"[CLEANUP] Cache matching rimossa per {gene_original}")
+
     print(f"[DONE] {gene_original}")
     return gene_original
+
+# ------------ PROCESSA UN GENE (NEI PROCESSI PARALLELI) ------------
+def permutation_test_interaction(
+    df_original,
+    gene_col,
+    formula_builder,
+    onset_col,
+    Ecols,
+    covariates,
+    match_k,
+    n_perm=1000,
+    seed=42
+):
+    """
+    Permutation test CORRETTO:
+    - permuto il gene sull'intero dataset originale
+    - rifaccio il matching per ogni permutazione
+    - rifaccio il modello
+    - raccolgo i beta permutati
+    """
+
+    rng = np.random.RandomState(seed)
+
+    # ==== 1. Observed model sul matched vero ====
+    matched_obs = match_control_units(
+        df_original,
+        gene_col,
+        k=match_k,
+        covariates_for_matching=Ecols + covariates
+    )
+    if matched_obs is None or matched_obs.shape[0] < 5:
+        return None, None, np.array([])
+
+    formula_obs = formula_builder(onset_col, gene_col, Ecols, covariates, matched_obs)
+    mod_obs = smf.ols(formula=formula_obs, data=matched_obs).fit()
+
+    interaction_name = _find_interaction_term(mod_obs.params.index, gene_col)
+    if interaction_name is None:
+        return None, None, np.array([])
+
+    beta_obs = mod_obs.params[interaction_name]
+
+    # ==== 2. Distribuzione nulla ====
+    perm_betas = []
+
+    for _ in tqdm(range(n_perm), desc=f"Perm test {gene_col}", leave=False):
+        df_perm = df_original.copy()
+
+        # permuto il gene
+        df_perm[gene_col] = rng.permutation(df_perm[gene_col].values)
+
+        # nuovo matching su permutato
+        matched_perm = match_control_units(
+            df_perm,
+            gene_col,
+            k=match_k,
+            covariates_for_matching=Ecols + covariates
+        )
+
+        if matched_perm is None or matched_perm.shape[0] < 5:
+            perm_betas.append(np.nan)
+            continue
+
+        # modello su permutato
+        try:
+            formula_perm = formula_builder(onset_col, gene_col, Ecols, covariates, matched_perm)
+            mod_perm = smf.ols(formula=formula_perm, data=matched_perm).fit()
+            beta_perm = mod_perm.params.get(interaction_name, np.nan)
+        except Exception:
+            beta_perm = np.nan
+
+        perm_betas.append(beta_perm)
+
+    perm_betas = np.array([x for x in perm_betas if not np.isnan(x)])
+
+    if perm_betas.size == 0:
+        return beta_obs, None, np.array([])
+
+    # ==== p-value empirico ====
+    p_emp = float(np.mean(np.abs(perm_betas) >= np.abs(beta_obs)))
+
+
+    return float(beta_obs), p_emp, perm_betas
 
 
 # ------------ MAIN SCRIPT ---------------
@@ -274,6 +330,9 @@ def main():
     # drop columns with too many missing "-1"
     df_gen = df_gen.loc[:, (df_gen == -1).mean() < 0.30]
     gene_cols = [c for c in df_gen.columns if c not in non_gen_cols]
+
+    # PER TEST
+    # gene_cols = gene_cols[:5]
 
     for g in gene_cols:
         df_gen[g] = (df_gen[g] > 0).astype(int)
@@ -306,7 +365,7 @@ def main():
     gene_cols_safe = list(safe.values())
     mapping = {v: k for k, v in safe.items()}
 
-    print(f"Totale geni: {len(gene_cols_safe)}")
+    print(f"Totale varianti: {len(gene_cols_safe)}")
 
     # --------- SALVA DF IN PICKLE PER I PROCESSI ---------
     df.to_pickle(TEMP_DF_PATH)
@@ -324,6 +383,69 @@ def main():
             except Exception as e:
                 print("Errore in un processo:", e)
 
+    results_df = load_gene_results()
+    results_df = add_fdr(results_df)
+    volcano_plot(results_df, save_path="volcano_plot.png")
+
+def add_fdr(df, p_col="empirical_p", fdr_col="fdr"):
+    df = df.copy()
+    # converti in float
+    pvals = df[p_col].astype(float).values
+    df[fdr_col] = multipletests(pvals, method="fdr_bh")[1]
+    return df
+
+
+def volcano_plot(df,
+                 beta_col="obs_coef",
+                 p_col="empirical_p",
+                 gene_col="gene",
+                 p_thresh=1e-5,
+                 fdr_col="fdr",
+                 fdr_thresh=0.05,
+                 save_path=None):
+    df = df.copy()
+    df["neglog10p"] = -np.log10(df[p_col])
+
+    plt.figure(figsize=(9, 7))
+
+    # tutti i punti
+    plt.scatter(df[beta_col], df["neglog10p"], alpha=0.6)
+
+    # linee cutoff
+    plt.axhline(-np.log10(p_thresh), linestyle="--", color="red", label=f"p = {p_thresh}")
+
+    # evidenzia FDR significativi
+    if fdr_col in df.columns:
+        sig_fdr = df[df[fdr_col] < fdr_thresh]
+        plt.scatter(sig_fdr[beta_col], sig_fdr["neglog10p"],
+                    s=50, edgecolor="black", label=f"FDR < {fdr_thresh}", color="orange")
+
+    plt.xlabel("Beta dell'interazione")
+    plt.ylabel("-log10(p)")
+    plt.title("Volcano Plot: Interazioni Gene × Ambiente")
+    plt.legend()
+
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        print(f"Volcano plot salvato in: {save_path}")
+    else:
+        plt.show()
+
+    plt.close()
+
+def load_or_compute_matched(df, gene_col, gene_original, k, covariates_for_matching):
+    cache_file = f"matched_{gene_col}.pkl"
+    if os.path.exists(cache_file):
+        with open(cache_file, "rb") as f:
+            matched = pickle.load(f)
+        print(f"[CACHE] Matching caricato per {gene_original}")
+    else:
+        matched = match_control_units(df, gene_col, k=k, covariates_for_matching=covariates_for_matching)
+        with open(cache_file, "wb") as f:
+            pickle.dump(matched, f)
+        print(f"[CACHE] Matching salvato per {gene_original}")
+
+    return matched
 
 if __name__ == "__main__":
     main()
