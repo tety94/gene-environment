@@ -38,13 +38,13 @@ def save_gene_iteration(gene, iteration, coef, pvalue, n):
         cur.close()
         conn.close()
 
-def save_gene_result(gene, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p):
+def save_gene_result(gene, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p,empirical_p_std):
     conn = get_conn()
     cur = conn.cursor()
     try:
         cur.execute("""
-            INSERT INTO gene_results (gene, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p, completed)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,1)
+            INSERT INTO gene_results (gene, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p, empirical_p_std, completed)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,1)
             ON DUPLICATE KEY UPDATE 
                 mutati=VALUES(mutati),
                 non_mutati=VALUES(non_mutati),
@@ -52,8 +52,9 @@ def save_gene_result(gene, mutati, non_mutati, obs_coef, mean_coef, sd_coef, emp
                 mean_coef=VALUES(mean_coef),
                 sd_coef=VALUES(sd_coef),
                 empirical_p=VALUES(empirical_p),
+                empirical_p_std=VALUES(empirical_p_std),
                 completed=1
-        """, (gene, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p))
+        """, (gene, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p, empirical_p_std))
         conn.commit()
     finally:
         cur.close()

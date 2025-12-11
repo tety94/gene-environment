@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import random
+import pickle
 from sklearn.preprocessing import StandardScaler
 import statsmodels.formula.api as smf
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -19,8 +20,9 @@ random_state = 42
 standardize = True
 min_treated = 5
 min_sample_size = 10
-max_workers = 6   # CPU parallele
-# ---------------------------------------
+max_workers = 6
+TEMP_DF_PATH = "temp_df.pkl"
+# ----------------------------------------
 
 np.random.seed(random_state)
 random.seed(random_state)
@@ -35,10 +37,13 @@ def build_formula(onset_col, gene_col, exposures, covariates, df_subset):
     return formula
 
 
-# ------------ PROCESSA UN GENE (USATO NEI PROCESSI PARALLELI) ------------
-def process_single_gene(gene_col, gene_original, df, Ecols):
+# ------------ PROCESSA UN GENE (NEI PROCESSI PARALLELI) ------------
+def process_single_gene(gene_col, gene_original, Ecols):
 
     print(f"[START] {gene_original}")
+
+    # ↓ Carichiamo il DF locale, ogni processo lo legge da file
+    df = pickle.load(open(TEMP_DF_PATH, "rb"))
 
     if gene_already_done(gene_original):
         print(f"[SKIP] {gene_original}")
@@ -47,6 +52,13 @@ def process_single_gene(gene_col, gene_original, df, Ecols):
     treated_df = df[df[gene_col] == 1].reset_index(drop=True)
     control_df = df[df[gene_col] == 0].reset_index(drop=True)
     n_treated = len(treated_df)
+
+    threshold = 50
+
+    if n_treated < threshold:
+        n_sample = n_treated * 3
+    else:
+        n_sample = n_treated
 
     if n_treated < min_treated or len(control_df) == 0:
         print(f"[SKIP] Too few treated or controls for {gene_original}")
@@ -57,20 +69,22 @@ def process_single_gene(gene_col, gene_original, df, Ecols):
     try:
         cols = [onset_col, gene_col] + Ecols + covariates
         df_model = df[cols].dropna()
+
         if df_model.shape[0] >= min_sample_size:
             formula = build_formula(onset_col, gene_col, Ecols, covariates, df_model)
             mod = smf.ols(formula=formula, data=df_model).fit()
             inter = [n for n in mod.params.index if gene_col in n and ":" in n]
             if inter:
-                obs_coef = mod.params[inter[0]]
+                obs_coef = float(mod.params[inter[0]])
     except Exception as e:
-        print(f"[ERROR obs] {gene_original}: {e}")
+        print(f"[ERROR OBS] {gene_original}: {e}")
 
     # -------- MONTE CARLO --------
     coefs = []
     for it in range(n_iter):
         try:
-            sampled_ctrl = control_df.sample(n=n_treated, replace=True, random_state=random_state + it)
+            sampled_ctrl = control_df.sample(n=n_sample, replace=True,
+                                             random_state=random_state + it + hash(gene_col) % 10000)
             sampled = pd.concat([treated_df, sampled_ctrl])
 
             cols = [onset_col, gene_col] + Ecols + covariates
@@ -89,7 +103,6 @@ def process_single_gene(gene_col, gene_original, df, Ecols):
 
             coefs.append(coef_val)
 
-            # salva subito nel DB
             save_gene_iteration(gene_original, it, coef_val, p_val, df_ols.shape[0])
 
         except Exception as e:
@@ -97,7 +110,17 @@ def process_single_gene(gene_col, gene_original, df, Ecols):
 
     # ------- STATISTICHE FINALI --------
     valid = [c for c in coefs if not np.isnan(c)]
-    emp_p = np.mean(np.abs(valid) >= np.abs(obs_coef)) if valid and not np.isnan(obs_coef) else None
+
+    emp_p = (
+        np.mean(np.abs(valid) >= np.abs(obs_coef))
+        if valid and not np.isnan(obs_coef)
+        else None
+    )
+    emp_p_std = (
+        np.std(np.abs(valid) >= np.abs(obs_coef))
+        if valid and not np.isnan(obs_coef)
+        else None
+    )
 
     save_gene_result(
         gene_original,
@@ -106,7 +129,8 @@ def process_single_gene(gene_col, gene_original, df, Ecols):
         obs_coef,
         np.mean(valid) if valid else None,
         np.std(valid) if valid else None,
-        emp_p
+        emp_p,
+        emp_p_std
     )
 
     print(f"[DONE] {gene_original}")
@@ -130,14 +154,14 @@ def main():
 
     # --------- LOAD ENV ---------
     df_env = pd.read_csv(env_file, sep=sep, decimal=decimal)
-    df_env['id'] = df_env.get('dna').combine_first(df_env.get('codice_genome'))
+
     df = pd.merge(df_env, df_gen, on="id", how="inner")
     df[onset_col] = pd.to_numeric(df[onset_col], errors="coerce")
 
     # --------- STANDARDIZE ---------
     Ecols = []
     for exp in exposures:
-        df[exp] = pd.to_numeric(df[exp], errors='coerce')
+        df[exp] = pd.to_numeric(df[exp], errors="coerce")
         if standardize:
             df[exp + "_std"] = StandardScaler().fit_transform(df[[exp]])
             Ecols.append(exp + "_std")
@@ -152,15 +176,21 @@ def main():
 
     print(f"Totale geni: {len(gene_cols_safe)}")
 
+    # --------- SALVA DF IN PICKLE PER I PROCESSI ---------
+    df.to_pickle(TEMP_DF_PATH)
+
     # --------- PARALLEL PROCESSING ---------
     with ProcessPoolExecutor(max_workers=max_workers) as ex:
         futures = [
-            ex.submit(process_single_gene, gc, mapping[gc], df, Ecols)
+            ex.submit(process_single_gene, gc, mapping[gc], Ecols)
             for gc in gene_cols_safe
         ]
 
         for f in as_completed(futures):
-            _ = f.result()  # solo per sollevare eccezioni eventuali
+            try:
+                f.result()
+            except Exception as e:
+                print("Errore in un processo:", e)
 
 
 if __name__ == "__main__":
