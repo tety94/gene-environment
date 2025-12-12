@@ -128,6 +128,96 @@ def match_control_units(df, gene_col, k=2, covariates_for_matching=None):
     return matched_df
 
 
+def check_balance(matched_df, gene_col, covariates_for_matching):
+    """
+    Calcola le Differenze Standardizzate delle Medie (SMD) per valutare
+    il bilanciamento delle covariate nel set matched.
+
+    Restituisce un dizionario {nome_covariata: SMD_value}.
+    """
+    if matched_df is None:
+        return {}
+
+    # 1. Separazione dei gruppi (dati originali e puliti)
+    treated = matched_df[matched_df[gene_col] == 1].copy()
+    control = matched_df[matched_df[gene_col] == 0].copy()
+
+    if treated.shape[0] == 0 or control.shape[0] == 0:
+        return {}
+
+    # Per standardizzare correttamente, dobbiamo usare la deviazione standard del
+    # campione non matched, ma spesso per comodità si usa il set matched o
+    # un pooled standard deviation. Qui useremo un approccio semplificato e robusto
+    # che standardizza le covariate prima di confrontare le medie.
+
+    smd_results = {}
+
+    # 2. Elaborazione delle covariate (simulando _prepare_matching_matrix)
+    # L'SMD non deve essere calcolato sui dati standardizzati (Scaled),
+    # ma sui dati originali rispetto alla deviazione standard *prima* dello scaling.
+
+    for c in covariates_for_matching:
+        if c not in matched_df.columns:
+            continue
+
+        # Variabili Numeriche (standard SMD)
+        if pd.api.types.is_numeric_dtype(matched_df[c]):
+            # Imputazione con la media del matched set per gestire i NaN
+            c_treated = treated[c].fillna(treated[c].mean())
+            c_control = control[c].fillna(control[c].mean())
+
+            mean_t = c_treated.mean()
+            mean_c = c_control.mean()
+
+            # Calcolo della Pooled Standard Deviation
+            n_t = c_treated.count()
+            n_c = c_control.count()
+            std_t = c_treated.std(ddof=1)  # Usare ddof=1 (sample std)
+            std_c = c_control.std(ddof=1)
+
+            # Usare la deviazione standard del gruppo di controllo (pratica comune)
+            # o la pooled standard deviation. Usiamo la pooled per robustezza.
+            if n_t + n_c - 2 > 0:
+                pooled_std = np.sqrt(
+                    ((n_t - 1) * std_t ** 2 + (n_c - 1) * std_c ** 2) / (n_t + n_c - 2)
+                )
+            else:
+                pooled_std = 1  # Evita divisione per zero in casi estremi
+
+            if pooled_std == 0:
+                smd = 0
+            else:
+                smd = np.abs(mean_t - mean_c) / pooled_std
+
+            smd_results[c] = smd
+
+        # Variabili Categoriche (tramite One-Hot Encoding e SMD sui dummy)
+        else:
+            # One-hot encode per calcolare l'SMD su ogni livello
+            dummies = pd.get_dummies(matched_df[c].astype(str), prefix=c, drop_first=True)
+
+            for d_col in dummies.columns:
+                d_treated = dummies.loc[treated.index, d_col]
+                d_control = dummies.loc[control.index, d_col]
+
+                # Per le dummy (che sono 0/1), la media è la proporzione (p)
+                p_t = d_treated.mean()
+                p_c = d_control.mean()
+
+                # La std (deviazione standard) di una binaria è sqrt(p*(1-p))
+                # Pooled variance per variabili binarie
+                p_pooled = (p_t * len(d_treated) + p_c * len(d_control)) / (len(d_treated) + len(d_control))
+                pooled_std = np.sqrt(p_pooled * (1 - p_pooled))
+
+                if pooled_std == 0:
+                    smd = 0
+                else:
+                    smd = np.abs(p_t - p_c) / pooled_std
+
+                smd_results[d_col] = smd
+
+    return smd_results
+
 # ----------------- PERMUTATION TEST -----------------
 
 def _find_interaction_term(mod_params_index, gene_col):
@@ -189,6 +279,19 @@ def process_single_gene(gene_col, gene_original, Ecols):
         print(f"[SKIP] Matching failed or too small for {gene_original}")
         conn.close()
         return None
+
+    # >>> PUNTO DI INSERIMENTO DELLA DIAGNOSTICA <<<
+    smd_results = check_balance(matched_obs, gene_col, cov_match)
+    max_smd = max(smd_results.values())
+    print(f"[{gene_original}] Max SMD dopo matching: {max_smd:.3f}")
+
+    # B. L'azione da intraprendere
+    if max_smd > 0.25:  # Soglia comune è 0.1 o 0.25
+        print(f"[WARN] Il matching per {gene_original} ha fallito il bilanciamento (Max SMD = {max_smd:.3f})")
+        # Qui può decidere se:
+        # 1. Stampare il warning e proseguire (accettare risultati potenzialmente distorti).
+        # 2. Saltare il gene e registrare il fallimento (più rigoroso).
+        # return None # <--- Opzione rigorosa
 
     # ---------- FIT MODEL OBSERVATO ----------
     try:
