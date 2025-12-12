@@ -27,7 +27,7 @@ random_state = 42
 standardize = True
 min_treated = 5
 min_sample_size = 10
-max_workers = 8
+max_workers = 16
 TEMP_DF_PATH = "temp_df.pkl"
 # number of matched controls per treated unit
 match_k = 3
