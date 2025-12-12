@@ -140,79 +140,105 @@ def _find_interaction_term(mod_params_index, gene_col):
     return None
 
 def process_single_gene(gene_col, gene_original, Ecols):
-
+    """
+    Processa un singolo gene:
+    - filtra il dataset
+    - fa il matching
+    - calcola il coefficiente di interazione osservato
+    - esegue il test di permutazione sul dataset originale, rifacendo il matching per ogni permutazione
+    - salva i risultati nel database
+    """
     print(f"[START] {gene_original}")
 
-    # ogni processo legge il DF dal pickle
-    df = pickle.load(open(TEMP_DF_PATH, "rb"))
-    conn = get_conn()
+    # ---------- CARICA DATAFRAME E APRE CONNESSIONE ----------
+    df = pickle.load(open(TEMP_DF_PATH, "rb"))  # ogni processo legge dal pickle
+    conn = get_conn()  # apertura connessione MySQL per tutto il processo
+
+    # Salta il gene se già completato
     if gene_already_done(conn, gene_original):
         print(f"[SKIP] {gene_original}")
+        conn.close()
         return None
 
-    # check counts
+    # ---------- CONTA TRATTATI E CONTROLLI ----------
     n_treated = int((df[gene_col] == 1).sum())
     n_control = int((df[gene_col] == 0).sum())
     if n_treated < min_treated or n_control == 0:
         print(f"[SKIP] Too few treated ({n_treated}) or controls ({n_control}) for {gene_original}")
+        conn.close()
         return None
 
-    # columns for modeling
+    # ---------- PREPARA DATAFRAME PER IL MODELLO ----------
     cols = [onset_col, gene_col] + Ecols + covariates
     df_model = df[cols].dropna()
     if df_model.shape[0] < min_sample_size:
         print(f"[SKIP] Not enough complete cases for {gene_original}: {df_model.shape[0]}")
+        conn.close()
         return None
 
-    # ---------- MATCHING ----------
+    # ---------- MATCHING SUL DATASET ORIGINALE ----------
     cov_match = Ecols + covariates
     try:
-        matched = match_control_units(df_model, gene_col, k=match_k, covariates_for_matching=cov_match)
+        matched_obs = match_control_units(df_model, gene_col, k=match_k, covariates_for_matching=cov_match)
     except Exception as e:
         print(f"[MATCH ERROR] {gene_original}: {e}")
+        conn.close()
         return None
 
-    if matched is None or matched.shape[0] < min_sample_size:
+    if matched_obs is None or matched_obs.shape[0] < min_sample_size:
         print(f"[SKIP] Matching failed or too small for {gene_original}")
+        conn.close()
         return None
 
-    # ---------- FIT MODEL ON MATCHED SAMPLE (OBSERVED) ----------
+    # ---------- FIT MODEL OBSERVATO ----------
     try:
-        formula = build_formula(onset_col, gene_col, Ecols, covariates, matched)
-        mod = smf.ols(formula=formula, data=matched).fit()
+        formula = build_formula(onset_col, gene_col, Ecols, covariates, matched_obs)
+        mod = smf.ols(formula=formula, data=matched_obs).fit()
         interaction_name = _find_interaction_term(mod.params.index, gene_col)
         if interaction_name is None:
             print(f"[SKIP] No interaction term found for {gene_original}")
+            conn.close()
             return None
-
         obs_coef = float(mod.params[interaction_name])
     except Exception as e:
         print(f"[ERROR OBS] {gene_original}: {e}")
         obs_coef = None
 
-    # ---------- PERMUTATION TEST DENTRO MATCHED SAMPLE ----------
+    # ---------- PERMUTATION TEST SUL DATASET ORIGINALE ----------
     rng = np.random.RandomState(random_state + (abs(hash(gene_col)) % 2_000_000))
     perm_betas = []
 
     for _ in tqdm(range(n_perm), desc=f"Perm test {gene_col}", leave=False):
-        df_perm = matched.copy()
-        df_perm[gene_col] = rng.permutation(df_perm[gene_col].values)
+        # copia l'intero dataset originale per permutazione
+        df_perm = df_model.copy()
+        df_perm[gene_col] = rng.permutation(df_perm[gene_col].values)  # permuta il gene
+
+        # nuovo matching sul dataset permutato
         try:
-            mod_perm = smf.ols(formula=formula, data=df_perm).fit()
+            matched_perm = match_control_units(df_perm, gene_col, k=match_k, covariates_for_matching=cov_match)
+            if matched_perm is None or matched_perm.shape[0] < min_sample_size:
+                perm_betas.append(np.nan)
+                continue
+
+            # fit modello sul matched set permutato
+            mod_perm = smf.ols(formula=formula, data=matched_perm).fit()
             perm_betas.append(mod_perm.params.get(interaction_name, np.nan))
         except Exception:
             perm_betas.append(np.nan)
 
+    # filtra NaN
     perm_betas = np.array([x for x in perm_betas if not np.isnan(x)])
+
+    # calcola p-value empirico
     p_emp = float(np.mean(np.abs(perm_betas) >= np.abs(obs_coef))) if perm_betas.size > 0 else None
 
-    # ---------- SAVE RESULTS ----------
+    # ---------- SALVA RISULTATI NEL DATABASE ----------
     try:
         save_gene_result(
             conn,
             gene_original,
-            int(matched[gene_col].sum()),  # treated in matched
-            int((matched[gene_col] == 0).sum()),  # controls matched
+            int(matched_obs[gene_col].sum()),  # numero di trattati nel matched set
+            int((matched_obs[gene_col] == 0).sum()),  # numero di controlli nel matched set
             obs_coef,
             float(np.mean(perm_betas)) if perm_betas.size > 0 else None,
             float(np.std(perm_betas)) if perm_betas.size > 0 else None,
@@ -224,6 +250,7 @@ def process_single_gene(gene_col, gene_original, Ecols):
     print(f"[DONE] {gene_original}")
     conn.close()
     return gene_original
+
 
 
 # ------------ MAIN SCRIPT ---------------
