@@ -6,7 +6,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import NearestNeighbors
 import statsmodels.formula.api as smf
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from db import gene_already_done, load_gene_results, save_gene_result
+from db import gene_already_done, load_gene_results, save_gene_result, get_conn
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
@@ -145,8 +145,8 @@ def process_single_gene(gene_col, gene_original, Ecols):
 
     # ogni processo legge il DF dal pickle
     df = pickle.load(open(TEMP_DF_PATH, "rb"))
-
-    if gene_already_done(gene_original):
+    conn = get_conn()
+    if gene_already_done(conn, gene_original):
         print(f"[SKIP] {gene_original}")
         return None
 
@@ -209,6 +209,7 @@ def process_single_gene(gene_col, gene_original, Ecols):
     # ---------- SAVE RESULTS ----------
     try:
         save_gene_result(
+            conn,
             gene_original,
             int(matched[gene_col].sum()),  # treated in matched
             int((matched[gene_col] == 0).sum()),  # controls matched
@@ -221,6 +222,7 @@ def process_single_gene(gene_col, gene_original, Ecols):
         print(f"[SAVE ERROR] {gene_original}: {e}")
 
     print(f"[DONE] {gene_original}")
+    conn.close()
     return gene_original
 
 
