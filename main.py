@@ -139,7 +139,6 @@ def _find_interaction_term(mod_params_index, gene_col):
             return name
     return None
 
-
 def process_single_gene(gene_col, gene_original, Ecols):
 
     print(f"[START] {gene_original}")
@@ -152,11 +151,8 @@ def process_single_gene(gene_col, gene_original, Ecols):
         return None
 
     # check counts
-    treated_df = df[df[gene_col] == 1]
-    control_df = df[df[gene_col] == 0]
     n_treated = int((df[gene_col] == 1).sum())
     n_control = int((df[gene_col] == 0).sum())
-
     if n_treated < min_treated or n_control == 0:
         print(f"[SKIP] Too few treated ({n_treated}) or controls ({n_control}) for {gene_original}")
         return None
@@ -164,7 +160,6 @@ def process_single_gene(gene_col, gene_original, Ecols):
     # columns for modeling
     cols = [onset_col, gene_col] + Ecols + covariates
     df_model = df[cols].dropna()
-
     if df_model.shape[0] < min_sample_size:
         print(f"[SKIP] Not enough complete cases for {gene_original}: {df_model.shape[0]}")
         return None
@@ -172,8 +167,7 @@ def process_single_gene(gene_col, gene_original, Ecols):
     # ---------- MATCHING ----------
     cov_match = Ecols + covariates
     try:
-        # matched = match_control_units(df_model, gene_col, k=match_k, covariates_for_matching=cov_match)
-        matched = load_or_compute_matched(df_model, gene_col, gene_original, match_k, cov_match) #caching
+        matched = match_control_units(df_model, gene_col, k=match_k, covariates_for_matching=cov_match)
     except Exception as e:
         print(f"[MATCH ERROR] {gene_original}: {e}")
         return None
@@ -196,24 +190,21 @@ def process_single_gene(gene_col, gene_original, Ecols):
         print(f"[ERROR OBS] {gene_original}: {e}")
         obs_coef = None
 
-    # ---------- PERMUTATION TEST ON MATCHED SAMPLE ----------
-    seed = random_state + (abs(hash(gene_col)) % 2_000_000)
-    try:
-        beta_obs, p_emp, perm_coefs = permutation_test_interaction(
-            df,  # dataset originale
-            gene_col,
-            build_formula,
-            onset_col,
-            Ecols,
-            covariates,
-            match_k,
-            n_perm=n_perm,
-            seed=seed,
-        )
+    # ---------- PERMUTATION TEST DENTRO MATCHED SAMPLE ----------
+    rng = np.random.RandomState(random_state + (abs(hash(gene_col)) % 2_000_000))
+    perm_betas = []
 
-    except Exception as e:
-        print(f"[PERM ERROR] {gene_original}: {e}")
-        beta_obs, p_emp, perm_coefs = obs_coef, None, np.array([])
+    for _ in tqdm(range(n_perm), desc=f"Perm test {gene_col}", leave=False):
+        df_perm = matched.copy()
+        df_perm[gene_col] = rng.permutation(df_perm[gene_col].values)
+        try:
+            mod_perm = smf.ols(formula=formula, data=df_perm).fit()
+            perm_betas.append(mod_perm.params.get(interaction_name, np.nan))
+        except Exception:
+            perm_betas.append(np.nan)
+
+    perm_betas = np.array([x for x in perm_betas if not np.isnan(x)])
+    p_emp = float(np.mean(np.abs(perm_betas) >= np.abs(obs_coef))) if perm_betas.size > 0 else None
 
     # ---------- SAVE RESULTS ----------
     try:
@@ -222,20 +213,16 @@ def process_single_gene(gene_col, gene_original, Ecols):
             int(matched[gene_col].sum()),  # treated in matched
             int((matched[gene_col] == 0).sum()),  # controls matched
             obs_coef,
-            float(np.mean(perm_coefs)) if perm_coefs.size > 0 else None,
-            float(np.std(perm_coefs)) if perm_coefs.size > 0 else None,
+            float(np.mean(perm_betas)) if perm_betas.size > 0 else None,
+            float(np.std(perm_betas)) if perm_betas.size > 0 else None,
             p_emp,
         )
     except Exception as e:
         print(f"[SAVE ERROR] {gene_original}: {e}")
 
-    cache_file = f"matched_{gene_col}.pkl"
-    if os.path.exists(cache_file):
-        os.remove(cache_file)
-        print(f"[CLEANUP] Cache matching rimossa per {gene_original}")
-
     print(f"[DONE] {gene_original}")
     return gene_original
+
 
 # ------------ PROCESSA UN GENE (NEI PROCESSI PARALLELI) ------------
 def permutation_test_interaction(
