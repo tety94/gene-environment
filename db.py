@@ -1,7 +1,7 @@
 # db.py
 import mysql.connector
 from mysql.connector import pooling
-from config import DB_USER, DB_PASSWORD
+from config import DB_USER, DB_PASSWORD, DB_NAME
 import pandas as pd
 
 
@@ -11,7 +11,7 @@ pool = pooling.MySQLConnectionPool(
     host="localhost",
     user=DB_USER,
     password=DB_PASSWORD,
-    database="cresla_definitivo"
+    database=DB_NAME
 )
 
 def get_conn():
