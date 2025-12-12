@@ -5,43 +5,26 @@ from config import DB_USER, DB_PASSWORD, DB_NAME
 import pandas as pd
 
 
-pool = pooling.MySQLConnectionPool(
-    pool_name="mypool",
-    pool_size=10,
-    host="localhost",
-    user=DB_USER,
-    password=DB_PASSWORD,
-    database=DB_NAME
-)
-
 def get_conn():
-    return pool.get_connection()
+    """Crea una connessione nuova (ogni processo ne avrà una)"""
+    conn = mysql.connector.connect(
+        host="localhost",
+        user=DB_USER,
+        password=DB_PASSWORD,
+        database=DB_NAME,
+        autocommit=True
+    )
+    return conn
 
-def gene_already_done(gene):
-    conn = get_conn()
+def gene_already_done(conn, gene):
     cur = conn.cursor()
     cur.execute("SELECT gene FROM gene_results WHERE gene=%s AND completed=1", (gene,))
     r = cur.fetchone()
     cur.close()
-    conn.close()
     return r is not None
 
-def save_gene_iteration(gene, iteration, coef, pvalue, n):
-    conn = get_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute("""
-            INSERT INTO gene_iterations (gene, iteration, coef, pvalue, n)
-            VALUES (%s,%s,%s,%s,%s)
-            ON DUPLICATE KEY UPDATE coef=VALUES(coef), pvalue=VALUES(pvalue), n=VALUES(n)
-        """, (gene, iteration, coef, pvalue, n))
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
 
-def save_gene_result(gene, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p):
-    conn = get_conn()
+def save_gene_result(conn, gene, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p):
     cur = conn.cursor()
     try:
         cur.execute("""
@@ -56,10 +39,8 @@ def save_gene_result(gene, mutati, non_mutati, obs_coef, mean_coef, sd_coef, emp
                 empirical_p=VALUES(empirical_p),
                 completed=1
         """, (gene, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p))
-        conn.commit()
     finally:
         cur.close()
-        conn.close()
 
 def load_gene_results():
     conn = get_conn()
