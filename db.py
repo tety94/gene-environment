@@ -73,4 +73,3 @@ def load_gene_results():
         cur.close()
         conn.close()
     return df
-
