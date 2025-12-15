@@ -2,6 +2,7 @@ import os
 import pandas as pd
 from glob import glob
 from config import VFC_FOLDERS, NULL_PRECENTAGE
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # -------------------------------
 # Configurazione
@@ -13,7 +14,7 @@ os.makedirs(output_folder, exist_ok=True)
 # Cromosomi da processare
 chromosomes = [str(i) for i in range(1, 23)]
 
-for chr_num in chromosomes:
+def merge_chromosome(chr_num):
     print(f"\n🔹 Processing chromosome {chr_num}")
 
     # Trova tutti i CSV per questo cromosoma
@@ -24,7 +25,7 @@ for chr_num in chromosomes:
 
     if not csv_files:
         print(f"⚠️ Nessun CSV trovato per chr{chr_num}")
-        continue
+        return
 
     merged_df = pd.DataFrame()
 
@@ -47,3 +48,12 @@ for chr_num in chromosomes:
     output_csv = os.path.join(output_folder, f"chr{chr_num}_merged.csv")
     merged_df.to_csv(output_csv)
     print(f"✅ CSV unito salvato in: {output_csv}")
+
+# -------------------------------
+# Parallelizzazione
+# -------------------------------
+with ProcessPoolExecutor(max_workers=16) as executor:
+    futures = [executor.submit(merge_chromosome, chr_num) for chr_num in chromosomes]
+
+    for future in as_completed(futures):
+        future.result()  # Solleva eventuali eccezioni
