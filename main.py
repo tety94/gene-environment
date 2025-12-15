@@ -24,12 +24,12 @@ def main():
     start_time = datetime.now()
     print(f"[START] Analisi iniziata alle: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-    df, variant_cols_safe, mapping, Ecols = load_and_prepare_data()
+    df, variant_cols_safe, mapping, Ecols, variant_cols = load_and_prepare_data()
     df.to_pickle("temp_df.pkl")
 
     # Prepara la lista di dizionari da inserire nel DB
     variants_to_insert = []
-    for v in variant_cols_safe:
+    for v in variant_cols:
         parts = v.split("_", 2)
         chromosome = parts[0] if len(parts) > 0 else None
         position = int(parts[1]) if len(parts) > 1 else None

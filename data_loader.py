@@ -50,4 +50,4 @@ def load_and_prepare_data():
     variant_cols_safe = list(safe.values())
     mapping = {v: k for k, v in safe.items()}
 
-    return df, variant_cols_safe, mapping, Ecols
+    return df, variant_cols_safe, mapping, Ecols, variant_cols
