@@ -7,11 +7,12 @@ def load_and_prepare_data():
     # ---------- LOAD GENETIC ----------
     print(f"[START] Carico file genetica: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     df_gen = pd.read_csv(RAW_FILE, sep=SEP, decimal=DECIMAL)
+    print(f"[START] Trovo colonne: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     non_gen_cols = ["FID", "IID", "PAT", "MAT", "SEX", "PHENOTYPE", "id"]
     variant_cols = [c for c in df_gen.columns if c not in non_gen_cols]
 
-    for g in variant_cols:
-        df_gen[g] = (df_gen[g] > 0).astype(int)
+    print(f"[START] metto type int: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    df_gen[variant_cols] = (df_gen[variant_cols].values > 0).astype(int)
 
     if "IID" in df_gen.columns:
         df_gen = df_gen.rename(columns={"IID": "id"})
