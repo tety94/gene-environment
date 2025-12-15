@@ -20,34 +20,45 @@ def _find_interaction_term(mod_params_index, variant_col):
             return name
     return None
 
+def save_variant_result_not_calculated(conn, variant_original, muted, not_muted, max_smd =None):
+    save_variant_result(conn, variant_original, muted,not_muted, None, None, None, 1, None, max_smd)
+
 def process_single_variant(variant_col, variant_original, Ecols):
     df = pickle.load(open("temp_df.pkl", "rb"))
     conn = get_conn()
 
     if not mark_variant_in_progress(conn, variant_original):
+        print(f"[INFO] Return 1: {variant_original} già in progress")
         # qualcun altro la sta già processando
         conn.close()
         return None
 
     if variant_already_done(conn, variant_original):
+        print(f"[INFO] Return 2: {variant_original} già calcolata")
         conn.close()
         return None
 
     n_treated = int((df[variant_col] == 1).sum())
     n_control = int((df[variant_col] == 0).sum())
     if n_treated < MIN_TREATED or n_control == 0:
+        print(f"[INFO] Return 3: {variant_original} numero insufficiente")
+        save_variant_result_not_calculated(conn, variant_original, n_treated, n_control, None, None, None, 1, None)
         conn.close()
         return None
 
     cols = [ONSET_COL, variant_col] + Ecols
     df_model = df[cols].dropna()
     if df_model.shape[0] < MIN_SAMPLE_SIZE:
+        print(f"[INFO] Return 4: {variant_original} numero insufficiente")
+        save_variant_result_not_calculated(conn, variant_original, n_treated, n_control, None, None, None, 1, None)
         conn.close()
         return None
 
     cov_match = Ecols
     matched_obs = match_control_units(df_model, variant_col, k=MATCH_K, covariates_for_matching=cov_match)
     if matched_obs is None or matched_obs.shape[0] < MIN_SAMPLE_SIZE:
+        print(f"[INFO] Return 5: {variant_original} numero insufficiente")
+        save_variant_result_not_calculated(conn, variant_original, n_treated, n_control, None, None, None, 1, None)
         conn.close()
         return None
 
@@ -57,8 +68,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
     if max_smd > 0.25:
         print(f"[WARN] Il matching per {variant_original} ha fallito il bilanciamento (Max SMD = {max_smd:.3f})")
         #todo: capire se fare un retur e non calcoare perchè matching fallito
-        save_variant_result(conn, variant_original, int(matched_obs[variant_col].sum()),
-                            int((matched_obs[variant_col] == 0).sum()), None, None, None, 1, None, max_smd)
+        save_variant_result_not_calculated(conn, variant_original, n_treated, n_control, None, None, None, 1, None, max_smd)
         conn.close()
         return variant_original
 
