@@ -54,3 +54,12 @@ def load_gene_results():
         cur.close()
         conn.close()
     return df
+
+def delete_genes(conn, gene_list):
+    if not gene_list:
+        return
+    cursor = conn.cursor()
+    format_strings = ','.join(['%s'] * len(gene_list))
+    cursor.execute(f"DELETE FROM gene_results WHERE gene IN ({format_strings})", tuple(gene_list))
+    conn.commit()
+    cursor.close()

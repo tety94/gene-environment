@@ -32,3 +32,7 @@ MAX_WORKERS = 16
 DB_USER = ''
 DB_PASSWORD = ''
 DB_NAME =''
+
+# ---------------- SIGNIFICATIVITÀ / SECOND RUN ----------------
+PVALUE_THRESHOLD = 0.05    # soglia per considerare significativo
+N_PERM_HIGH = 10000        # numero permutazioni per il secondo run
