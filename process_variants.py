@@ -13,6 +13,7 @@ def main():
             update_variant_gene(conn, variant['variant'], gene_id,gene_name)
             print(f"{variant['variant']} aggiornato con gene {gene_id}")
         else:
+            update_variant_gene(conn, variant['variant'], 'NO-GENE','NO-GENE')
             print(f"Nessun gene trovato per {variant}")
 
     conn.close()
