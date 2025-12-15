@@ -8,7 +8,6 @@ def load_and_prepare_data():
     print(f"[START] Carico file genetica: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     df_gen = pd.read_csv(RAW_FILE, sep=SEP, decimal=DECIMAL)
     non_gen_cols = ["FID", "IID", "PAT", "MAT", "SEX", "PHENOTYPE", "id"]
-    df_gen = df_gen.loc[:, (df_gen == -1).mean() < 0.30]
     variant_cols = [c for c in df_gen.columns if c not in non_gen_cols]
 
     for g in variant_cols:
