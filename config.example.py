@@ -39,3 +39,4 @@ N_PERM_HIGH = 10000        # numero permutazioni per il secondo run
 
 # GENE REDUCTION
 VFC_FOLDERS = []
+NULL_PRECENTAGE = 0.30
