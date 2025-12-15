@@ -20,7 +20,7 @@ for input_folder in input_vcf_folders:
     output_vcf_folder = os.path.join(input_folder, output_subfolder)
     os.makedirs(output_vcf_folder, exist_ok=True)
 
-    vcf_files = [f for f in os.listdir(input_folder) if f.endswith(".vcf")]
+    vcf_files = [f for f in os.listdir(input_folder) if f.endswith(".vcf.gz")]
 
     for vcf_file in vcf_files:
         input_path = os.path.join(input_folder, vcf_file)
