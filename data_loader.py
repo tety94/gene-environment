@@ -7,9 +7,9 @@ def load_and_prepare_data():
     df_gen = pd.read_csv(RAW_FILE, sep=SEP, decimal=DECIMAL)
     non_gen_cols = ["FID", "IID", "PAT", "MAT", "SEX", "PHENOTYPE", "id"]
     df_gen = df_gen.loc[:, (df_gen == -1).mean() < 0.30]
-    gene_cols = [c for c in df_gen.columns if c not in non_gen_cols]
+    variant_cols = [c for c in df_gen.columns if c not in non_gen_cols]
 
-    for g in gene_cols:
+    for g in variant_cols:
         df_gen[g] = (df_gen[g] > 0).astype(int)
 
     if "IID" in df_gen.columns:
@@ -34,9 +34,9 @@ def load_and_prepare_data():
             Ecols.append(exp)
 
     # ---------- SAFE GENE NAMES ----------
-    safe = {g: f"gene_{i}" for i, g in enumerate(gene_cols)}
+    safe = {g: f"variant_{i}" for i, g in enumerate(variant_cols)}
     df.rename(columns=safe, inplace=True)
-    gene_cols_safe = list(safe.values())
+    variant_cols_safe = list(safe.values())
     mapping = {v: k for k, v in safe.items()}
 
-    return df, gene_cols_safe, mapping, Ecols
+    return df, variant_cols_safe, mapping, Ecols

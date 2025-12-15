@@ -1,5 +1,5 @@
 #test fallito
-# praticamente cercavo di vedere se direttamente senza modificare i dati si vedesse una relazione gene ambiente per i PON
+# praticamente cercavo di vedere se direttamente senza modificare i dati si vedesse una relazione variant ambiente per i PON
 
 
 # montecarlo_onset_ols.py
@@ -19,7 +19,7 @@ sep = ';'
 decimal = '.'
 
 # Variabili
-gene_col = "is_C9"  # colonna 0/1 che indica mutato
+variant_col = "is_C9"  # colonna 0/1 che indica mutato
 exposures = ["seminativi_1000"]  # lista esposizioni
 covariates = ["sex"]  # eventuali covariate
 onset_col = "onset_age"  # outcome
@@ -41,8 +41,8 @@ random.seed(random_state)
 # load dataframe
 df = pd.read_csv(fn_env, sep=sep, decimal=decimal)
 
-# assicuriamoci che gene e onset siano numerici
-df[gene_col] = pd.to_numeric(df[gene_col]).fillna(0).astype(int)
+# assicuriamoci che variant e onset siano numerici
+df[variant_col] = pd.to_numeric(df[variant_col]).fillna(0).astype(int)
 df[onset_col] = pd.to_numeric(df[onset_col], errors='coerce')
 
 # standardizza esposizioni
@@ -57,24 +57,24 @@ for exp in exposures:
         Ecols.append(exp)
 
 # separa mutati e controlli
-treated_df = df[df[gene_col] == 1].reset_index(drop=True)
-control_df = df[df[gene_col] == 0].reset_index(drop=True)
+treated_df = df[df[variant_col] == 1].reset_index(drop=True)
+control_df = df[df[variant_col] == 0].reset_index(drop=True)
 n_treated = len(treated_df)
 print(f"Mutati: {n_treated}, Non-mutati disponibili: {len(control_df)}")
 
 # coefficiente osservato full sample
 obs_coef = np.nan
 try:
-    cols_model = [onset_col, gene_col] + Ecols + [c for c in covariates if c in df.columns]
+    cols_model = [onset_col, variant_col] + Ecols + [c for c in covariates if c in df.columns]
     df_model = df[cols_model].dropna()
     if df_model.shape[0] >= 10:
         exposures_str = " + ".join(Ecols)
-        formula = f"{onset_col} ~ {gene_col} * ({exposures_str})"
+        formula = f"{onset_col} ~ {variant_col} * ({exposures_str})"
         if covariates:
             cov_str = " + ".join([c for c in covariates if c in df_model.columns])
             formula += " + " + cov_str
         mod = smf.ols(formula=formula, data=df_model).fit()
-        inter_name = [n for n in mod.params.index if gene_col in n and ':' in n]
+        inter_name = [n for n in mod.params.index if variant_col in n and ':' in n]
         if inter_name:
             obs_coef = mod.params[inter_name[0]]
 except Exception as e:
@@ -90,16 +90,16 @@ for it in range(n_iter):
 
     ols_res = {"iter": it, "ols_coef": np.nan, "n": 0}
     try:
-        cols_model = [onset_col, gene_col] + Ecols + [c for c in covariates if c in sampled.columns]
+        cols_model = [onset_col, variant_col] + Ecols + [c for c in covariates if c in sampled.columns]
         df_ols = sampled[cols_model].dropna()
         if df_ols.shape[0] >= 10:
             exposures_str = " + ".join(Ecols)
-            formula = f"{onset_col} ~ {gene_col} * ({exposures_str})"
+            formula = f"{onset_col} ~ {variant_col} * ({exposures_str})"
             if covariates:
                 cov_str = " + ".join([c for c in covariates if c in df_ols.columns])
                 formula += " + " + cov_str
             mod = smf.ols(formula=formula, data=df_ols).fit()
-            inter_name = [n for n in mod.params.index if gene_col in n and ':' in n]
+            inter_name = [n for n in mod.params.index if variant_col in n and ':' in n]
             if inter_name:
                 ols_res["ols_coef"] = mod.params[inter_name[0]]
             ols_res["n"] = df_ols.shape[0]

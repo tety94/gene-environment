@@ -8,22 +8,22 @@ if len(sys.argv) < 2:
     print("Uso: python estrai_varianti.py GENE1 [GENE2 ...]")
     sys.exit(1)
 
-genes_input = sys.argv[1:]
-print("Geni richiesti:", genes_input)
+variants_input = sys.argv[1:]
+print("Geni richiesti:", variants_input)
 
 # ---- Recupera coordinate ENSEMBL ----
-def get_gene_coordinates(gene):
-    url = f"https://rest.ensembl.org/lookup/symbol/homo_sapiens/{gene}?content-type=application/json"
+def get_variant_coordinates(variant):
+    url = f"https://rest.ensembl.org/lookup/symbol/homo_sapiens/{variant}?content-type=application/json"
     r = requests.get(url)
     r.raise_for_status()
     d = r.json()
     return d["seq_region_name"], d["start"], d["end"]
 
 regions_by_chr = {}
-for gene in genes_input:
-    chr_num, s, e = get_gene_coordinates(gene)
-    regions_by_chr.setdefault(chr_num, IntervalTree()).add(Interval(s, e+1, gene))
-    print(f"{gene}: chr{chr_num}:{s}-{e}")
+for variant in variants_input:
+    chr_num, s, e = get_variant_coordinates(variant)
+    regions_by_chr.setdefault(chr_num, IntervalTree()).add(Interval(s, e+1, variant))
+    print(f"{variant}: chr{chr_num}:{s}-{e}")
 
 vcf_folders = [
     "/mnt/cresla_prod/genome_datasets/gen2",
@@ -57,11 +57,11 @@ for vcf_file in vcf_files:
 
         hits = regions_by_chr[chr_num][rec.POS]
         if not hits:
-            continue  # non in nessun gene richiesto
+            continue  # non in nessun variant richiesto
 
         for hit in hits:  # possibile variante cade in più geni
-            gene = hit.data
-            variant_id = f"{gene}_{rec.CHROM}_{rec.POS}_{rec.REF}_{rec.ALT[0]}"
+            variant = hit.data
+            variant_id = f"{variant}_{rec.CHROM}_{rec.POS}_{rec.REF}_{rec.ALT[0]}"
 
             gt = rec.gt_types  # array di 0,1,2,3
             genotypes = {s: (g if g != 3 else -1) for s, g in zip(samples, gt)}
@@ -78,6 +78,6 @@ df = df.reindex(samples_order).fillna(-1).astype(int)
 df = df.loc[:, (df == -1).mean() < 0.30]
 
 
-out = f"/tmp/variants_chr_{'_'.join(genes_input)}.csv"
+out = f"/tmp/variants_chr_{'_'.join(variants_input)}.csv"
 df.to_csv(out, sep=";")
 print(f"Salvato {out} ({df.shape[0]} samples, {df.shape[1]} varianti)")

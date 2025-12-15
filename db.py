@@ -16,19 +16,19 @@ def get_conn():
     )
     return conn
 
-def gene_already_done(conn, gene):
+def variant_already_done(conn, variant):
     cur = conn.cursor()
-    cur.execute("SELECT gene FROM gene_results WHERE gene=%s AND completed=1", (gene,))
+    cur.execute("SELECT variant FROM variant_results WHERE variant=%s AND completed=1", (variant,))
     r = cur.fetchone()
     cur.close()
     return r is not None
 
 
-def save_gene_result(conn, gene, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p):
+def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p):
     cur = conn.cursor()
     try:
         cur.execute("""
-            INSERT INTO gene_results (gene, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p, completed)
+            INSERT INTO variant_results (variant, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p, completed)
             VALUES (%s,%s,%s,%s,%s,%s,%s,1)
             ON DUPLICATE KEY UPDATE 
                 mutati=VALUES(mutati),
@@ -38,28 +38,28 @@ def save_gene_result(conn, gene, mutati, non_mutati, obs_coef, mean_coef, sd_coe
                 sd_coef=VALUES(sd_coef),
                 empirical_p=VALUES(empirical_p),
                 completed=1
-        """, (gene, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p))
+        """, (variant, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p))
     finally:
         cur.close()
 
-def load_gene_results():
+def load_variant_results():
     conn = get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT gene, obs_coef, empirical_p FROM gene_results WHERE completed=1")
+        cur.execute("SELECT variant, obs_coef, empirical_p FROM variant_results WHERE completed=1")
         rows = cur.fetchall()
         # costruisci DataFrame manualmente
-        df = pd.DataFrame(rows, columns=["gene", "obs_coef", "empirical_p"])
+        df = pd.DataFrame(rows, columns=["variant", "obs_coef", "empirical_p"])
     finally:
         cur.close()
         conn.close()
     return df
 
-def delete_genes(conn, gene_list):
-    if not gene_list:
+def delete_variants(conn, variant_list):
+    if not variant_list:
         return
     cursor = conn.cursor()
-    format_strings = ','.join(['%s'] * len(gene_list))
-    cursor.execute(f"DELETE FROM gene_results WHERE gene IN ({format_strings})", tuple(gene_list))
+    format_strings = ','.join(['%s'] * len(variant_list))
+    cursor.execute(f"DELETE FROM variant_results WHERE variant IN ({format_strings})", tuple(variant_list))
     conn.commit()
     cursor.close()

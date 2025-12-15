@@ -24,9 +24,9 @@ def _prepare_matching_matrix(df, cols):
     X_scaled = pd.DataFrame(StandardScaler().fit_transform(X), columns=X.columns, index=X.index)
     return X_scaled
 
-def match_control_units(df, gene_col, k=2, covariates_for_matching=None):
-    treated = df[df[gene_col] == 1].reset_index(drop=True)
-    control = df[df[gene_col] == 0].reset_index(drop=True)
+def match_control_units(df, variant_col, k=2, covariates_for_matching=None):
+    treated = df[df[variant_col] == 1].reset_index(drop=True)
+    control = df[df[variant_col] == 0].reset_index(drop=True)
 
     if treated.shape[0] == 0 or control.shape[0] == 0:
         return None
@@ -34,7 +34,7 @@ def match_control_units(df, gene_col, k=2, covariates_for_matching=None):
     df_matching = pd.concat([treated, control], ignore_index=True)
     X = _prepare_matching_matrix(df_matching, covariates_for_matching)
 
-    mask_t = df_matching[gene_col] == 1
+    mask_t = df_matching[variant_col] == 1
     X_t = X[mask_t]
     X_c = X[~mask_t]
 
@@ -53,12 +53,12 @@ def match_control_units(df, gene_col, k=2, covariates_for_matching=None):
     matched_df = pd.concat([matched_treated, matched_controls], ignore_index=True)
     return matched_df
 
-def check_balance(matched_df, gene_col, covariates_for_matching):
+def check_balance(matched_df, variant_col, covariates_for_matching):
     if matched_df is None:
         return {}
 
-    treated = matched_df[matched_df[gene_col] == 1]
-    control = matched_df[matched_df[gene_col] == 0]
+    treated = matched_df[matched_df[variant_col] == 1]
+    control = matched_df[matched_df[variant_col] == 0]
     smd_results = {}
 
     for c in covariates_for_matching:

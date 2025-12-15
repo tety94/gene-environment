@@ -8,7 +8,7 @@ def add_fdr(df, p_col="empirical_p", fdr_col="fdr"):
     df[fdr_col] = multipletests(pvals, method="fdr_bh")[1]
     return df
 
-def volcano_plot(df, beta_col="obs_coef", p_col="empirical_p", gene_col="gene",
+def volcano_plot(df, beta_col="obs_coef", p_col="empirical_p", variant_col="variant",
                  p_thresh=1e-5, fdr_col="fdr", fdr_thresh=0.05, save_path=None):
     df = df.copy()
     df["neglog10p"] = -np.log10(df[p_col])

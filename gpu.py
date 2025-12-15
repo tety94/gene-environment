@@ -5,7 +5,7 @@ import pickle
 from sklearn.preprocessing import StandardScaler
 import statsmodels.formula.api as smf
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from db import gene_already_done, load_gene_results, save_gene_result, get_conn
+from db import variant_already_done, load_variant_results, save_variant_result, get_conn
 from tqdm import tqdm
 import torch
 import os
@@ -38,9 +38,9 @@ random.seed(random_state)
 torch.manual_seed(random_state)
 
 
-def build_formula(onset_col, gene_col, exposures, covariates, df_subset):
+def build_formula(onset_col, variant_col, exposures, covariates, df_subset):
     exposures_str = " + ".join(exposures)
-    formula = f"{onset_col} ~ {gene_col} * ({exposures_str})"
+    formula = f"{onset_col} ~ {variant_col} * ({exposures_str})"
     cov_in_df = [c for c in covariates if c in df_subset.columns]
     if cov_in_df:
         formula += " + " + " + ".join(cov_in_df)
@@ -63,16 +63,16 @@ def _prepare_matching_matrix(df, cols):
     return X_scaled.astype(np.float32)
 
 
-def match_control_units(df, gene_col, k=2, covariates_for_matching=None, device=0):
-    treated = df[df[gene_col] == 1].reset_index(drop=True)
-    control = df[df[gene_col] == 0].reset_index(drop=True)
+def match_control_units(df, variant_col, k=2, covariates_for_matching=None, device=0):
+    treated = df[df[variant_col] == 1].reset_index(drop=True)
+    control = df[df[variant_col] == 0].reset_index(drop=True)
     if treated.shape[0] == 0 or control.shape[0] == 0:
         return None
 
     df_matching = pd.concat([treated, control], ignore_index=True)
     X = _prepare_matching_matrix(df_matching, covariates_for_matching)
 
-    mask_t = df_matching[gene_col] == 1
+    mask_t = df_matching[variant_col] == 1
     X_t = X[mask_t]
     X_c = X[~mask_t]
 
@@ -90,12 +90,12 @@ def match_control_units(df, gene_col, k=2, covariates_for_matching=None, device=
     return matched_df
 
 
-def check_balance(matched_df, gene_col, covariates_for_matching):
+def check_balance(matched_df, variant_col, covariates_for_matching):
     smd_results = {}
     if matched_df is None:
         return smd_results
-    treated = matched_df[matched_df[gene_col] == 1]
-    control = matched_df[matched_df[gene_col] == 0]
+    treated = matched_df[matched_df[variant_col] == 1]
+    control = matched_df[matched_df[variant_col] == 0]
 
     for c in covariates_for_matching:
         if c not in matched_df.columns:
@@ -115,69 +115,69 @@ def check_balance(matched_df, gene_col, covariates_for_matching):
     return smd_results
 
 
-def _find_interaction_term(mod_params_index, gene_col):
+def _find_interaction_term(mod_params_index, variant_col):
     for name in mod_params_index:
-        if ":" in name and gene_col in name:
+        if ":" in name and variant_col in name:
             return name
     return None
 
 
-def process_single_gene(gene_col, gene_original, Ecols, device=0):
-    print(f"[START] {gene_original} on GPU {device}")
+def process_single_variant(variant_col, variant_original, Ecols, device=0):
+    print(f"[START] {variant_original} on GPU {device}")
     df = pickle.load(open(TEMP_DF_PATH, "rb"))
     conn = get_conn()
-    if gene_already_done(conn, gene_original):
-        print(f"[SKIP] {gene_original}")
+    if variant_already_done(conn, variant_original):
+        print(f"[SKIP] {variant_original}")
         conn.close()
         return
 
-    n_treated = int((df[gene_col] == 1).sum())
-    n_control = int((df[gene_col] == 0).sum())
+    n_treated = int((df[variant_col] == 1).sum())
+    n_control = int((df[variant_col] == 0).sum())
     if n_treated < min_treated or n_control == 0:
-        print(f"[SKIP] Too few treated ({n_treated}) or controls ({n_control}) for {gene_original}")
+        print(f"[SKIP] Too few treated ({n_treated}) or controls ({n_control}) for {variant_original}")
         conn.close()
         return
 
-    cols = [onset_col, gene_col] + Ecols + covariates
+    cols = [onset_col, variant_col] + Ecols + covariates
     df_model = df[cols].dropna()
     if df_model.shape[0] < min_sample_size:
-        print(f"[SKIP] Not enough complete cases for {gene_original}")
+        print(f"[SKIP] Not enough complete cases for {variant_original}")
         conn.close()
         return
 
     cov_match = Ecols + covariates
     try:
-        matched_obs = match_control_units(df_model, gene_col, k=match_k, covariates_for_matching=cov_match, device=device)
+        matched_obs = match_control_units(df_model, variant_col, k=match_k, covariates_for_matching=cov_match, device=device)
     except Exception as e:
-        print(f"[MATCH ERROR] {gene_original}: {e}")
+        print(f"[MATCH ERROR] {variant_original}: {e}")
         conn.close()
         return
 
     if matched_obs is None or matched_obs.shape[0] < min_sample_size:
-        print(f"[SKIP] Matching failed for {gene_original}")
+        print(f"[SKIP] Matching failed for {variant_original}")
         conn.close()
         return
 
-    smd_results = check_balance(matched_obs, gene_col, cov_match)
+    smd_results = check_balance(matched_obs, variant_col, cov_match)
     max_smd = max(smd_results.values(), default=0)
-    print(f"[{gene_original}] Max SMD dopo matching: {max_smd:.3f}")
+    print(f"[{variant_original}] Max SMD dopo matching: {max_smd:.3f}")
 
-    formula = build_formula(onset_col, gene_col, Ecols, covariates, matched_obs)
+    formula = build_formula(onset_col, variant_col, Ecols, covariates, matched_obs)
     try:
         mod = smf.ols(formula=formula, data=matched_obs).fit()
-        interaction_name = _find_interaction_term(mod.params.index, gene_col)
+        interaction_name = _find_interaction_term(mod.params.index, variant_col)
         obs_coef = float(mod.params[interaction_name]) if interaction_name else None
     except Exception as e:
-        print(f"[ERROR OBS] {gene_original}: {e}")
+        print(f"[ERROR OBS] {variant_original}: {e}")
         obs_coef = None
 
-    rng = np.random.RandomState(random_state + (abs(hash(gene_col)) % 2_000_000))
+    rng = np.random.RandomState(random_state + (abs(hash(variant_col)) % 2_000_000))
     perm_betas = []
-    for _ in tqdm(range(n_perm), desc=f"Perm test {gene_col}", leave=False):
+    for _ in tqdm(range(n_perm), desc=f"Perm test {variant_col}", leave=False):
         df_perm = df_model.copy()
-        df_perm[gene_col] = rng.permutation(df_perm[gene_col].values)
+        df_perm[variant_col] = rng.permutation(df_perm[variant_col].values)
         try:
-            matched_perm = match_control_units(df_perm, gene_col, k=match_k, covariates_for_matching=cov_match, device=device)
+            matched_perm = match_control_units(df_perm, variant_col, k=match_k, covariates_for_matching=cov_match, device=device)
             if matched_perm is None or matched_perm.shape[0] < min_sample_size:
                 perm_betas.append(np.nan)
                 continue
@@ -190,20 +190,20 @@ def process_single_gene(gene_col, gene_original, Ecols, device=0):
     p_emp = float(np.mean(np.abs(perm_betas) >= np.abs(obs_coef))) if perm_betas.size > 0 else None
 
     try:
-        save_gene_result(
+        save_variant_result(
             conn,
-            gene_original,
-            int(matched_obs[gene_col].sum()),
-            int((matched_obs[gene_col] == 0).sum()),
+            variant_original,
+            int(matched_obs[variant_col].sum()),
+            int((matched_obs[variant_col] == 0).sum()),
             obs_coef,
             float(np.mean(perm_betas)) if perm_betas.size > 0 else None,
             float(np.std(perm_betas)) if perm_betas.size > 0 else None,
             p_emp,
         )
     except Exception as e:
-        print(f"[SAVE ERROR] {gene_original}: {e}")
+        print(f"[SAVE ERROR] {variant_original}: {e}")
 
-    print(f"[DONE] {gene_original}")
+    print(f"[DONE] {variant_original}")
     conn.close()
 
 
@@ -211,9 +211,9 @@ def main():
     df_gen = pd.read_csv(raw_file, sep=sep, decimal=decimal)
     non_gen_cols = ["FID", "IID", "PAT", "MAT", "SEX", "PHENOTYPE", "id"]
     df_gen = df_gen.loc[:, (df_gen == -1).mean() < 0.30]
-    gene_cols = [c for c in df_gen.columns if c not in non_gen_cols]
+    variant_cols = [c for c in df_gen.columns if c not in non_gen_cols]
 
-    for g in gene_cols:
+    for g in variant_cols:
         df_gen[g] = (df_gen[g] > 0).astype(int)
 
     if "IID" in df_gen.columns:
@@ -235,9 +235,9 @@ def main():
         else:
             Ecols.append(exp)
 
-    safe = {g: f"gene_{i}" for i, g in enumerate(gene_cols)}
+    safe = {g: f"variant_{i}" for i, g in enumerate(variant_cols)}
     df.rename(columns=safe, inplace=True)
-    gene_cols_safe = list(safe.values())
+    variant_cols_safe = list(safe.values())
     mapping = {v: k for k, v in safe.items()}
 
     df.to_pickle(TEMP_DF_PATH)
@@ -245,13 +245,13 @@ def main():
     print(f"{n_gpu} GPU disponibili")
 
     # dividiamo i geni tra le GPU
-    chunks = np.array_split(gene_cols_safe, n_gpu)
+    chunks = np.array_split(variant_cols_safe, n_gpu)
     futures = []
     with ProcessPoolExecutor(max_workers=n_gpu) as ex:
         for i, chunk in enumerate(chunks):
             device = i  # GPU i-esima
             for gc in chunk:
-                futures.append(ex.submit(process_single_gene, gc, mapping[gc], Ecols, device=device))
+                futures.append(ex.submit(process_single_variant, gc, mapping[gc], Ecols, device=device))
         for f in as_completed(futures):
             try:
                 f.result()
