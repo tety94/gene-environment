@@ -39,7 +39,9 @@ for chr_num in chromosomes:
 
     # Sostituisci NaN con -1
     merged_df = merged_df.fillna(-1).astype(int)
-    df = df.loc[:, (df == -1).mean() < NULL_PRECENTAGE]
+
+    # Filtra colonne con troppi valori mancanti
+    merged_df = merged_df.loc[:, (merged_df == -1).mean() < NULL_PRECENTAGE]
 
     # Salva CSV finale per cromosoma
     output_csv = os.path.join(output_folder, f"chr{chr_num}_merged.csv")
