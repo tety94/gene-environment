@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import numpy as np
 from glob import glob
 from config import VFC_FOLDERS, NULL_PRECENTAGE, OUTPUT_FOLDER
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -38,13 +39,21 @@ def merge_chromosome(chr_num):
     # Filtra colonne con troppi valori mancanti
     merged_df = merged_df.loc[:, (merged_df == -1).mean() < NULL_PRECENTAGE]
 
+    # ---------------- BINARIZZAZIONE ----------------
+    variant_cols = merged_df.columns
+    arr = merged_df.values
+    arr[arr < 0] = 0
+    arr[arr > 0] = 1
+    merged_df[:] = arr.astype(np.int8)
+
     # Rimuovi eventuali duplicati di campioni
     merged_df = merged_df[~merged_df.index.duplicated(keep='first')]
 
     # Salva CSV finale
     output_csv = os.path.join(output_folder, f"chr{chr_num}_merged.csv")
     merged_df.to_csv(output_csv)
-    print(f"✅ CSV unito salvato in: {output_csv}")
+    print(f"✅ CSV unito e binarizzato salvato in: {output_csv}")
+
 
 # -------------------------------
 # Parallelizzazione
