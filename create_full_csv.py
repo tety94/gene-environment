@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 from glob import glob
+from concurrent.futures import ProcessPoolExecutor
 from config import OUTPUT_FOLDER
 
 merged_folder = OUTPUT_FOLDER
@@ -20,19 +21,33 @@ if not csv_files:
 
 print(f"🔹 Trovati {len(csv_files)} CSV da unire.")
 
-# Leggi tutti i CSV e mettili in una lista
-dfs = []
-for csv_file in csv_files:
+# Funzione per leggere un CSV
+def read_csv(csv_file):
     print(f"  Leggo {csv_file}")
     df = pd.read_csv(csv_file, index_col=0)
-    dfs.append(df)
+    return df
 
-# Merge progressivo
-full_df = dfs[0]
-for df in dfs[1:]:
-    full_df = full_df.join(df, how="outer", rsuffix="_dup")  # outer join per tenere tutti i campioni
-    # Rimuovi eventuali colonne duplicate
-    full_df = full_df.loc[:, ~full_df.columns.duplicated()]
+# Leggi i CSV in parallelo
+with ProcessPoolExecutor() as executor:
+    dfs = list(executor.map(read_csv, csv_files))
+
+# Merge dei DataFrame in blocchi paralleli
+def merge_pairwise(dfs_list):
+    """Merge dei dataframe in modo ricorsivo a coppie"""
+    while len(dfs_list) > 1:
+        new_list = []
+        for i in range(0, len(dfs_list), 2):
+            if i + 1 < len(dfs_list):
+                merged = dfs_list[i].join(dfs_list[i+1], how="outer", rsuffix="_dup")
+                # rimuovi colonne duplicate
+                merged = merged.loc[:, ~merged.columns.duplicated()]
+                new_list.append(merged)
+            else:
+                new_list.append(dfs_list[i])
+        dfs_list = new_list
+    return dfs_list[0]
+
+full_df = merge_pairwise(dfs)
 
 # Riempi NaN con -1
 full_df = full_df.fillna(-1).astype(int)
