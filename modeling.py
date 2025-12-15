@@ -52,6 +52,9 @@ def process_single_variant(variant_col, variant_original, Ecols):
     if max_smd > 0.25:
         print(f"[WARN] Il matching per {variant_col} ha fallito il bilanciamento (Max SMD = {max_smd:.3f})")
         #todo: capire se fare un retur e non calcoare perchè matching fallito
+        save_variant_result(conn, variant_original, int(matched_obs[variant_col].sum()),
+                            int((matched_obs[variant_col] == 0).sum()), None, None, None, 1, None, max_smd)
+        conn.close()
         return variant_original
 
     formula = build_formula(ONSET_COL, variant_col, Ecols, [], matched_obs)
@@ -64,7 +67,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
 
     if obs_coef is None or abs(obs_coef) < MIN_OBS_COEF:
         save_variant_result(conn, variant_original, int(matched_obs[variant_col].sum()),
-                         int((matched_obs[variant_col]==0).sum()), obs_coef, None, None, 1, None)
+                         int((matched_obs[variant_col]==0).sum()), obs_coef, None, None, 1, None, max_smd)
         conn.close()
         return variant_original
 
@@ -88,6 +91,6 @@ def process_single_variant(variant_col, variant_original, Ecols):
                      int((matched_obs[variant_col]==0).sum()), obs_coef,
                      float(np.mean(perm_betas)) if perm_betas.size>0 else None,
                      float(np.std(perm_betas)) if perm_betas.size>0 else None,
-                     p_emp, N_PERM)
+                     p_emp, N_PERM, max_smd)
     conn.close()
     return variant_original

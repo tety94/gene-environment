@@ -46,7 +46,7 @@ def update_variant_gene(conn, variant, gene_id, gene_name):
     conn.commit()
     cur.close()
 
-def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p, iterations):
+def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p, iterations, balance):
     cur = conn.cursor()
 
     parts = variant.split("_", 2)  # split massimo 2, così l'ultima parte resta tutta la mutazione
@@ -58,10 +58,10 @@ def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, 
     try:
         cur.execute("""
             INSERT INTO variant_results (
-                variant, gene, chromosome, position, mutation,
-                mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p, completed
+                variant, gene, chromosome, position, mutation, mutati, non_mutati, obs_coef, mean_coef, 
+                sd_coef, empirical_p, iterations, balance, completed 
             )
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1)
             ON DUPLICATE KEY UPDATE 
                 gene=VALUES(gene),
                 chromosome=VALUES(chromosome),
@@ -74,10 +74,11 @@ def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, 
                 sd_coef=VALUES(sd_coef),
                 empirical_p=VALUES(empirical_p),
                 iterations=VALUES(iterations),
+                balance=VALUES(balance),
                 completed=1
         """, (
-            variant, gene, chromosome, position, mutation,
-            mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p, iterations
+            variant, gene, chromosome, position, mutation, mutati, non_mutati, obs_coef, mean_coef,
+            sd_coef, empirical_p, iterations, balance
         ))
     finally:
         cur.close()
@@ -103,3 +104,41 @@ def delete_variants(conn, variant_list):
     cursor.execute(f"DELETE FROM variant_results WHERE variant IN ({format_strings})", tuple(variant_list))
     conn.commit()
     cursor.close()
+
+
+def insert_new_variants(variants):
+    """
+    Inserisce nuove varianti nella tabella variant_results.
+
+    Args:
+        variants (list of dict): lista di dizionari, ognuno con chiavi:
+            - variant
+            - chromosome
+            - position
+            - mutation
+    """
+    if not variants:
+        return 0
+
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    try:
+        sql = """
+        INSERT INTO variant_results 
+            (variant, chromosome, position, mutation, completed, in_progress)
+        VALUES (%s,%s,%s,%s,0,0)
+        ON DUPLICATE KEY UPDATE variant=variant
+        """
+        data = [
+            (v["variant"], v.get("chromosome"), v.get("position"), v.get("mutation"), 0, 0)
+            for v in variants
+        ]
+        cursor.executemany(sql, data)
+        conn.commit()
+        print(f"[INFO] Inserite/aggiornate {cursor.rowcount} varianti nel DB")
+    finally:
+        cursor.close()
+        conn.close()
+
+    return cursor.rowcount

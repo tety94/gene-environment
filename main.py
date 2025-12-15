@@ -4,7 +4,7 @@ from data_loader import load_and_prepare_data
 from modeling import process_single_variant
 from utils import add_fdr, volcano_plot
 from config import MAX_WORKERS, PVALUE_THRESHOLD, N_PERM_HIGH
-from db import load_variant_results, get_conn, delete_variants
+from db import load_variant_results, get_conn, delete_variants, insert_new_variants
 import config
 
 #todo: valutare split in discovery replication ed eventualmente valutare solo il beta concorde
@@ -26,6 +26,24 @@ def main():
 
     df, variant_cols_safe, mapping, Ecols = load_and_prepare_data()
     df.to_pickle("temp_df.pkl")
+
+    # Prepara la lista di dizionari da inserire nel DB
+    variants_to_insert = []
+    for v in variant_cols_safe:
+        parts = v.split("_", 2)
+        chromosome = parts[0] if len(parts) > 0 else None
+        position = int(parts[1]) if len(parts) > 1 else None
+        mutation = parts[2] if len(parts) > 2 else None
+
+        variants_to_insert.append({
+            "variant": v,
+            "chromosome": chromosome,
+            "position": position,
+            "mutation": mutation
+        })
+
+    # Inserisci nel DB
+    insert_new_variants(variants_to_insert)
 
     # ---------- PRIMO RUN ----------
     run_parallel_processing(variant_cols_safe, mapping, Ecols, description="primo run con permutazioni standard")
