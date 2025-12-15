@@ -24,6 +24,7 @@ def load_and_prepare_data():
     # ---------- LOAD ENV ----------
     print(f"[START] Carico file ambientali: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     df_env = pd.read_csv(ENV_FILE, sep=SEP, decimal=DECIMAL)
+    df_env['id'] = df_env['id'] + '_' + df_env['id']
     df_env["sex"] = df_env["sex"].astype("category")
     df_env["onset_site"] = df_env["onset_site"].astype("category")
 
