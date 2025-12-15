@@ -35,13 +35,13 @@ def get_empty_variants_gene():
         conn.close()
     return df
 
-def update_variant_gene(conn, variant, gene):
+def update_variant_gene(conn, variant, gene_id, gene_name):
     cur = conn.cursor()
     cur.execute("""
         UPDATE variant_results
-        SET gene=%s, completed=1
+        SET gene=%s, gene_name=%s
         WHERE variant=%s AND gene IS NULL
-    """, (gene, variant))
+    """, (gene_id, gene_name, variant))
     conn.commit()
     cur.close()
 

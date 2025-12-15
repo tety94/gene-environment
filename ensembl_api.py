@@ -6,8 +6,8 @@ def fetch_gene(chrom, pos):
     r.raise_for_status()
     data = r.json()
     if data:
-        try:
-            return data[0]['external_name']  # prende il primo gene trovato
-        except:
-            print(data)
-    return None
+        gene = data[0]
+        gene_id = gene['id']
+        gene_name = gene.get('external_name', gene_id)
+        return gene_id, gene_name
+    return None, None

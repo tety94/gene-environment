@@ -8,10 +8,10 @@ def main():
 
     for _, variant in variants.iterrows():
         chrom, pos = variant['chromosome'], variant['position']
-        gene = fetch_gene(chrom, pos)
-        if gene:
-            update_variant_gene(conn, variant['variant'], gene)
-            print(f"{variant['variant']} aggiornato con gene {gene}")
+        gene_id, gene_name = fetch_gene(chrom, pos)
+        if gene_id:
+            update_variant_gene(conn, variant['variant'], gene_id,gene_name)
+            print(f"{variant['variant']} aggiornato con gene {gene_id}")
         else:
             print(f"Nessun gene trovato per {variant}")
 
