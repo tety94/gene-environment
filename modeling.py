@@ -50,7 +50,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
     max_smd = max(smd_results.values()) if smd_results else 1  # default=1 se non ci sono SMD calcolabili
 
     if max_smd > 0.25:
-        print(f"[WARN] Il matching per {variant_col} ha fallito il bilanciamento (Max SMD = {max_smd:.3f})")
+        print(f"[WARN] Il matching per {variant_original} ha fallito il bilanciamento (Max SMD = {max_smd:.3f})")
         #todo: capire se fare un retur e non calcoare perchè matching fallito
         save_variant_result(conn, variant_original, int(matched_obs[variant_col].sum()),
                             int((matched_obs[variant_col] == 0).sum()), None, None, None, 1, None, max_smd)

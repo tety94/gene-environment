@@ -12,7 +12,7 @@ def load_and_prepare_data():
     non_gen_cols = ["FID", "IID", "PAT", "MAT", "SEX", "PHENOTYPE", "id"]
     variant_cols = [c for c in df_gen.columns if c not in non_gen_cols]
 
-    print(f"[START] metto type int: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    # print(f"[START] metto type int: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     # arr = df_gen[variant_cols].to_numpy(dtype=np.int8, copy=False)
     # arr[arr < 0] = 0  # -1 -> 0 (missing come 0)
     # arr[arr > 0] = 1  # 1/2 -> 1
