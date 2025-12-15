@@ -76,4 +76,4 @@ def process_vcf_folder(vcf_folder):
 # Ciclo su tutte le cartelle
 # -------------------------------
 for folder in input_folders:
-    process_vcf_folder(folder)
+    process_vcf_folder(folder + '/vcf_filtered')
