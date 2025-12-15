@@ -1,9 +1,11 @@
 import pandas as pd
+from datetime import datetime
 from sklearn.preprocessing import StandardScaler
 from config import RAW_FILE, ENV_FILE, SEP, DECIMAL, EXPOSURES, STANDARDIZE, ONSET_COL
 
 def load_and_prepare_data():
     # ---------- LOAD GENETIC ----------
+    print(f"[START] Carico file genetica: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     df_gen = pd.read_csv(RAW_FILE, sep=SEP, decimal=DECIMAL)
     non_gen_cols = ["FID", "IID", "PAT", "MAT", "SEX", "PHENOTYPE", "id"]
     df_gen = df_gen.loc[:, (df_gen == -1).mean() < 0.30]
@@ -16,14 +18,17 @@ def load_and_prepare_data():
         df_gen = df_gen.rename(columns={"IID": "id"})
 
     # ---------- LOAD ENV ----------
+    print(f"[START] Carico file ambientali: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     df_env = pd.read_csv(ENV_FILE, sep=SEP, decimal=DECIMAL)
     df_env["sex"] = df_env["sex"].astype("category")
     df_env["onset_site"] = df_env["onset_site"].astype("category")
 
+    print(f"[START] Merge file gene - ambiente: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     df = pd.merge(df_env, df_gen, on="id", how="inner")
     df[ONSET_COL] = pd.to_numeric(df[ONSET_COL], errors="coerce")
 
     # ---------- STANDARDIZE ----------
+    print(f"[START] Inizio standardizzazione: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     Ecols = []
     for exp in EXPOSURES:
         df[exp] = pd.to_numeric(df[exp], errors="coerce")
@@ -34,6 +39,7 @@ def load_and_prepare_data():
             Ecols.append(exp)
 
     # ---------- SAFE GENE NAMES ----------
+    print(f"[START] Creo dizionario per salvare i nomi delle variabili: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     safe = {g: f"variant_{i}" for i, g in enumerate(variant_cols)}
     df.rename(columns=safe, inplace=True)
     variant_cols_safe = list(safe.values())

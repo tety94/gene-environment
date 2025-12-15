@@ -1,62 +1,49 @@
 import os
-import pandas as pd
-from datetime import datetime
 from glob import glob
-from concurrent.futures import ProcessPoolExecutor
 from config import OUTPUT_FOLDER
 
 merged_folder = OUTPUT_FOLDER
-output_csv = os.path.join(merged_folder, "full_chr.csv")
+output_file = os.path.join(merged_folder, "full_chr.csv")
 
-# Elimina il file full_chr.csv se già esiste
-if os.path.exists(output_csv):
-    os.remove(output_csv)
-    print(f"🗑️ File esistente rimosso: {output_csv}")
+# elimina se esiste
+if os.path.exists(output_file):
+    os.remove(output_file)
 
-# Trova tutti i CSV nella cartella (escludendo eventuali file nascosti)
-csv_files = [f for f in glob(os.path.join(merged_folder, "*.csv")) if os.path.basename(f) != "full_chr.csv"]
+csv_files = sorted([
+    f for f in glob(os.path.join(merged_folder, "chr*_merged.csv"))
+    if not f.endswith("full_chr.csv")
+])
 
-if not csv_files:
-    print("⚠️ Nessun CSV trovato nella cartella!")
-    exit(1)
+print(f"🔹 Unione testuale di {len(csv_files)} file")
 
-print(f"🔹 Trovati {len(csv_files)} CSV da unire.")
+# ---- HEADER ----
+with open(csv_files[0], "r") as f:
+    header = f.readline().strip()
 
-# Funzione per leggere un CSV
-def read_csv(csv_file):
-    print(f"  Leggo {csv_file}")
-    df = pd.read_csv(csv_file, index_col=0)
-    return df
+for fpath in csv_files[1:]:
+    with open(fpath, "r") as f:
+        cols = f.readline().strip().split(",")[1:]  # salta ID
+        header += "," + ",".join(cols)
 
-# Leggi i CSV in parallelo
-with ProcessPoolExecutor() as executor:
-    dfs = list(executor.map(read_csv, csv_files))
+with open(output_file, "w") as out:
+    out.write(header + "\n")
 
-# Merge dei DataFrame in blocchi paralleli
-def merge_pairwise(dfs_list):
-    """Merge dei dataframe in modo ricorsivo a coppie"""
-    while len(dfs_list) > 1:
-        new_list = []
-        for i in range(0, len(dfs_list), 2):
-            if i + 1 < len(dfs_list):
-                merged = dfs_list[i].join(dfs_list[i+1], how="outer", rsuffix="_dup")
-                # rimuovi colonne duplicate
-                merged = merged.loc[:, ~merged.columns.duplicated()]
-                new_list.append(merged)
-            else:
-                new_list.append(dfs_list[i])
-        dfs_list = new_list
-    return dfs_list[0]
+# ---- RIGHE ----
+files = [open(f, "r") for f in csv_files]
 
-full_df = merge_pairwise(dfs)
+# salta header
+for f in files:
+    f.readline()
 
-# Riempi NaN con -1
-full_df = full_df.fillna(-1).astype(int)
+with open(output_file, "a") as out:
+    for rows in zip(*files):
+        base = rows[0].strip()
+        rest = []
+        for r in rows[1:]:
+            rest.append(",".join(r.strip().split(",")[1:]))
+        out.write(base + "," + ",".join(rest) + "\n")
 
-# Salva il CSV finale
-start_time = datetime.now()
-print(f"Inizio a salvare il file alle: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-full_df.to_csv(output_csv)
-print(f"✅ CSV completo salvato in: {output_csv}")
-end_time = datetime.now()
-print(f"Finisco a salvare il file alle: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+for f in files:
+    f.close()
+
+print(f"✅ File finale creato: {output_file}")
