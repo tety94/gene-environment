@@ -19,7 +19,7 @@ for chr_num in chromosomes:
     # Trova tutti i CSV per questo cromosoma
     csv_files = []
     for folder in input_folders:
-        pattern = os.path.join(folder, f"vcf_filtered/genotypes_matrix/*chr{chr_num}_genotypes.csv")
+        pattern = os.path.join(folder, f"vcf_filtered/genotypes_matrix/*chr{chr_num}.vcf_filtered_genotypes.csv")
         csv_files.extend(glob(pattern))
 
     if not csv_files:
