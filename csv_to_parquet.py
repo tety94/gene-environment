@@ -4,14 +4,13 @@ from datetime import datetime
 from config import OUTPUT_FOLDER
 
 # ---------------- CONFIG ----------------
-RAW_FILE = OUTPUT_FOLDER + "/full_chr.csv"
-OUT_PARQUET = OUTPUT_FOLDER +"/gen.parquet"
+RAW_FILE = f"{OUTPUT_FOLDER}/full_chr.csv"
+OUT_PARQUET = f"{OUTPUT_FOLDER}/gen.parquet"
 SEP = ","
 DECIMAL = "."
+NON_GEN_COLS = ["FID", "IID", "PAT", "MAT", "SEX", "PHENOTYPE", "id"]
 
-non_gen_cols = ["FID", "IID", "PAT", "MAT", "SEX", "PHENOTYPE", "id"]
-
-# ---------------- LOAD ----------------
+# ---------------- START ----------------
 print(f"[START] Carico CSV genetico: {datetime.now()}")
 df = pd.read_csv(
     RAW_FILE,
@@ -20,17 +19,16 @@ df = pd.read_csv(
     low_memory=False
 )
 
-# ---------------- COLONNE VARIANTI ----------------
-variant_cols = [c for c in df.columns if c not in non_gen_cols]
+# ---------------- VARIANT COLS ----------------
+variant_cols = [c for c in df.columns if c not in NON_GEN_COLS]
 print(f"[INFO] Varianti trovate: {len(variant_cols)}")
 
-# ---------------- BINARIZZAZIONE VELOCE ----------------
+# ---------------- BINARIZZAZIONE ----------------
 print(f"[START] Binarizzazione genotipi: {datetime.now()}")
-
 arr = df[variant_cols].to_numpy(dtype=np.int8, copy=False)
-arr[arr > 0] = 1     # 1/2 → 1
-# -1 e 0 restano invariati
-df[variant_cols] = arr
+arr[arr < 0] = 0  # -1 -> 0 (missing come 0)
+arr[arr > 0] = 1  # 1/2 -> 1
+df[variant_cols] = arr  # <- fondamentale per salvare i valori binari nel DataFrame
 
 # ---------------- RENAME ID ----------------
 if "IID" in df.columns and "id" not in df.columns:
@@ -41,7 +39,8 @@ print(f"[START] Salvataggio Parquet: {datetime.now()}")
 df.to_parquet(
     OUT_PARQUET,
     engine="pyarrow",
-    compression="zstd"
+    compression="zstd",
+    index=False
 )
 
 print(f"[DONE] File pronto: {OUT_PARQUET}")
