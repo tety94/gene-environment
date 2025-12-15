@@ -6,12 +6,12 @@ def main():
     conn = get_conn()
     variants = get_empty_variants_gene()
 
-    for variant in variants:
+    for _, variant in variants.iterrows():
         chrom, pos = variant['chromosome'], variant['position']
         gene = fetch_gene(chrom, pos)
         if gene:
-            update_variant_gene(conn, variant, gene)
-            print(f"{variant} aggiornato con gene {gene}")
+            update_variant_gene(conn, variant['variant'], gene)
+            print(f"{variant['variant']} aggiornato con gene {gene}")
         else:
             print(f"Nessun gene trovato per {variant}")
 
