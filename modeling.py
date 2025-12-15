@@ -47,7 +47,12 @@ def process_single_variant(variant_col, variant_original, Ecols):
         return None
 
     smd_results = check_balance(matched_obs, variant_col, cov_match)
-    max_smd = max(smd_results.values()) if smd_results else 0
+    max_smd = max(smd_results.values()) if smd_results else 1  # default=1 se non ci sono SMD calcolabili
+
+    if max_smd > 0.25:
+        print(f"[WARN] Il matching per {variant_col} ha fallito il bilanciamento (Max SMD = {max_smd:.3f})")
+        #todo: capire se fare un retur e non calcoare perchè matching fallito
+        return variant_original
 
     formula = build_formula(ONSET_COL, variant_col, Ecols, [], matched_obs)
     mod = smf.ols(formula=formula, data=matched_obs).fit()

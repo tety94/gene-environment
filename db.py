@@ -26,11 +26,25 @@ def variant_already_done(conn, variant):
 
 def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p):
     cur = conn.cursor()
+
+    parts = variant.split("_", 3)  # split massimo 3, così l'ultima parte resta tutta la mutazione
+    gene = parts[0] if len(parts) > 0 else None
+    chromosome = parts[1] if len(parts) > 1 else None
+    position = int(parts[2]) if len(parts) > 2 else None
+    mutation = parts[3] if len(parts) > 3 else None
+
     try:
         cur.execute("""
-            INSERT INTO variant_results (variant, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p, completed)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,1)
+            INSERT INTO variant_results (
+                variant, gene, chromosome, position, mutation,
+                mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p, completed
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1)
             ON DUPLICATE KEY UPDATE 
+                gene=VALUES(gene),
+                chromosome=VALUES(chromosome),
+                position=VALUES(position),
+                mutation=VALUES(mutation),
                 mutati=VALUES(mutati),
                 non_mutati=VALUES(non_mutati),
                 obs_coef=VALUES(obs_coef),
@@ -38,7 +52,10 @@ def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, 
                 sd_coef=VALUES(sd_coef),
                 empirical_p=VALUES(empirical_p),
                 completed=1
-        """, (variant, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p))
+        """, (
+            variant, gene, chromosome, position, mutation,
+            mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p
+        ))
     finally:
         cur.close()
 
