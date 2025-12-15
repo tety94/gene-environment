@@ -27,7 +27,7 @@ def get_empty_variants_gene():
     conn = get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT variant, mutation, position, chromosome FROM variant_results WHERE gene IS NULL")
+        cur.execute("SELECT variant, mutation, position, chromosome FROM variant_results WHERE gene IS NULL AND empirical_p < 0.05")
         rows = cur.fetchall()
         df = pd.DataFrame(rows, columns=["variant", "mutatio", "position", "chromosome"])
     finally:
@@ -45,7 +45,7 @@ def update_variant_gene(conn, variant, gene_id, gene_name):
     conn.commit()
     cur.close()
 
-def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p):
+def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p, iterations):
     cur = conn.cursor()
 
     parts = variant.split("_", 2)  # split massimo 2, così l'ultima parte resta tutta la mutazione
@@ -72,10 +72,11 @@ def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, 
                 mean_coef=VALUES(mean_coef),
                 sd_coef=VALUES(sd_coef),
                 empirical_p=VALUES(empirical_p),
+                iterations=VALUES(iterations),
                 completed=1
         """, (
             variant, gene, chromosome, position, mutation,
-            mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p
+            mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p, iterations
         ))
     finally:
         cur.close()
