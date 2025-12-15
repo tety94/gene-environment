@@ -4,7 +4,7 @@ from ensembl_api import fetch_gene
 
 def main():
     conn = get_conn()
-    variants = get_empty_variants_gene(conn)
+    variants = get_empty_variants_gene()
 
     for variant in variants:
         chrom, pos = variant['chromosome'], variant['position']
