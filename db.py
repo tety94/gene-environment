@@ -131,7 +131,7 @@ def insert_new_variants(variants):
         ON DUPLICATE KEY UPDATE variant=variant
         """
         data = [
-            (v["variant"], v.get("chromosome"), v.get("position"), v.get("mutation"), 0, 0)
+            (v["variant"], v.get("chromosome"), v.get("position"), v.get("mutation"))
             for v in variants
         ]
         cursor.executemany(sql, data)
