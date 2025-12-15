@@ -11,7 +11,7 @@ import config
 #todo: selezionare le varienti in base al linkage disequilibrium
 
 def run_parallel_processing(variants, mapping, Ecols, description=""):
-    print(f"[INFO] Avvio processi paralleli: {description} ({len(variants)} geni)")
+    print(f"[INFO] Avvio processi paralleli: {description} ({len(variants)} varianti)")
     with ProcessPoolExecutor(max_workers=MAX_WORKERS) as ex:
         futures = [ex.submit(process_single_variant, g, mapping[g], Ecols) for g in variants]
         for f in as_completed(futures):

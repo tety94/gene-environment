@@ -27,11 +27,11 @@ def variant_already_done(conn, variant):
 def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p):
     cur = conn.cursor()
 
-    parts = variant.split("_", 3)  # split massimo 3, così l'ultima parte resta tutta la mutazione
-    gene = parts[0] if len(parts) > 0 else None
-    chromosome = parts[1] if len(parts) > 1 else None
-    position = int(parts[2]) if len(parts) > 2 else None
-    mutation = parts[3] if len(parts) > 3 else None
+    parts = variant.split("_", 2)  # split massimo 2, così l'ultima parte resta tutta la mutazione
+    chromosome = parts[0] if len(parts) > 0 else None
+    position = int(parts[1]) if len(parts) > 1 else None
+    mutation = parts[2] if len(parts) > 2 else None
+    gene = None  # non presente in questo formato
 
     try:
         cur.execute("""
