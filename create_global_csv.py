@@ -1,11 +1,11 @@
 import os
 import pandas as pd
 from glob import glob
-from config import VFC_FOLDERS, NULL_PRECENTAGE
+from config import VFC_FOLDERS, NULL_PRECENTAGE, OUTPUT_FOLDER
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 input_folders = VFC_FOLDERS
-output_folder = "/mnt/cresla_prod/genome_datasets/merged_csv"
+output_folder = OUTPUT_FOLDER
 os.makedirs(output_folder, exist_ok=True)
 
 chromosomes = [str(i) for i in range(1, 23)]
