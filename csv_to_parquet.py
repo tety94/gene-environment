@@ -28,7 +28,7 @@ print(f"[START] Binarizzazione genotipi: {datetime.now()}")
 arr = df[variant_cols].to_numpy(dtype=np.int8, copy=False)
 arr[arr < 0] = 0  # -1 -> 0 (missing come 0)
 arr[arr > 0] = 1  # 1/2 -> 1
-df[variant_cols] = arr  # <- fondamentale per salvare i valori binari nel DataFrame
+df[variant_cols] = arr
 
 # ---------------- RENAME ID ----------------
 if "IID" in df.columns and "id" not in df.columns:

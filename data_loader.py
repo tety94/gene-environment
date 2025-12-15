@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from datetime import datetime
 from sklearn.preprocessing import StandardScaler
 from config import RAW_FILE, ENV_FILE, SEP, DECIMAL, EXPOSURES, STANDARDIZE, ONSET_COL
@@ -6,13 +7,16 @@ from config import RAW_FILE, ENV_FILE, SEP, DECIMAL, EXPOSURES, STANDARDIZE, ONS
 def load_and_prepare_data():
     # ---------- LOAD GENETIC ----------
     print(f"[START] Carico file genetica: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    df_gen = pd.read_csv(RAW_FILE, sep=SEP, decimal=DECIMAL)
+    df_gen = pd.read_csv(RAW_FILE, sep=SEP, decimal=DECIMAL, low_memory=False)
     print(f"[START] Trovo colonne: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     non_gen_cols = ["FID", "IID", "PAT", "MAT", "SEX", "PHENOTYPE", "id"]
     variant_cols = [c for c in df_gen.columns if c not in non_gen_cols]
 
     print(f"[START] metto type int: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    df_gen[variant_cols] = (df_gen[variant_cols].values > 0).astype(int)
+    arr = df_gen[variant_cols].to_numpy(dtype=np.int8, copy=False)
+    arr[arr < 0] = 0  # -1 -> 0 (missing come 0)
+    arr[arr > 0] = 1  # 1/2 -> 1
+    df_gen[variant_cols] = arr
 
     if "IID" in df_gen.columns:
         df_gen = df_gen.rename(columns={"IID": "id"})
