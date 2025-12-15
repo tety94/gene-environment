@@ -23,6 +23,27 @@ def variant_already_done(conn, variant):
     cur.close()
     return r is not None
 
+def get_empty_variants_gene():
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT variant, mutation, position, chromosome FROM variant_results WHERE gene IS NULL")
+        rows = cur.fetchall()
+        df = pd.DataFrame(rows, columns=["variant", "mutatio", "position", "chromosome"])
+    finally:
+        cur.close()
+        conn.close()
+    return df
+
+def update_variant_gene(conn, variant, gene):
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE variant_results
+        SET gene=%s, completed=1
+        WHERE variant=%s AND gene IS NULL
+    """, (gene, variant))
+    conn.commit()
+    cur.close()
 
 def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p):
     cur = conn.cursor()
