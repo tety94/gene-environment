@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+from datetime import datetime
 from glob import glob
 from concurrent.futures import ProcessPoolExecutor
 from config import OUTPUT_FOLDER
@@ -53,5 +54,9 @@ full_df = merge_pairwise(dfs)
 full_df = full_df.fillna(-1).astype(int)
 
 # Salva il CSV finale
+start_time = datetime.now()
+print(f"Inizio a salvare il file alle: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
 full_df.to_csv(output_csv)
 print(f"✅ CSV completo salvato in: {output_csv}")
+end_time = datetime.now()
+print(f"Finisco a salvare il file alle: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
