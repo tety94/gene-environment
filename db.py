@@ -3,7 +3,8 @@ import mysql.connector
 from mysql.connector import pooling
 from config import DB_USER, DB_PASSWORD, DB_NAME, DB_HOST, DB_PORT
 import pandas as pd
-
+import math
+import numpy as np
 
 def get_conn():
     """Crea una connessione nuova (ogni processo ne avrà una)"""
@@ -86,8 +87,13 @@ def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, 
                 balance=VALUES(balance),
                 completed=1
         """, (
-            variant, gene, chromosome, position, mutation, mutati, non_mutati, obs_coef, mean_coef,
-            sd_coef, empirical_p, iterations, balance
+            variant, gene, chromosome, position, mutation, mutati, non_mutati,
+            safe_val(obs_coef),
+            safe_val(mean_coef),
+            safe_val(sd_coef),
+            safe_val(empirical_p),
+            iterations,
+            safe_val(balance)
         ))
     finally:
         cur.close()
@@ -196,3 +202,12 @@ def reset_variant_in_progress(conn, variant, success=True):
         conn.commit()
     finally:
         cur.close()
+
+def safe_val(x):
+    if x is None:
+        return None
+    if isinstance(x, float) and math.isnan(x):
+        return None
+    if isinstance(x, (np.float32, np.float64)) and np.isnan(x):
+        return None
+    return x
