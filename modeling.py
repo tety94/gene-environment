@@ -3,7 +3,7 @@ import numpy as np
 import pickle
 from tqdm import tqdm
 from config import ONSET_COL, MATCH_K, MIN_TREATED, MIN_SAMPLE_SIZE, N_PERM, RANDOM_STATE, MIN_OBS_COEF
-from db import save_variant_result, variant_already_done, get_conn
+from db import save_variant_result, variant_already_done, get_conn, mark_variant_in_progress, reset_variant_in_progress
 from matching import match_control_units, check_balance
 
 def build_formula(onset_col, variant_col, exposures, covariates, df_subset):
@@ -23,6 +23,11 @@ def _find_interaction_term(mod_params_index, variant_col):
 def process_single_variant(variant_col, variant_original, Ecols):
     df = pickle.load(open("temp_df.pkl", "rb"))
     conn = get_conn()
+
+    if not mark_variant_in_progress(conn, variant_original):
+        # qualcun altro la sta già processando
+        conn.close()
+        return None
 
     if variant_already_done(conn, variant_original):
         conn.close()
@@ -92,5 +97,8 @@ def process_single_variant(variant_col, variant_original, Ecols):
                      float(np.mean(perm_betas)) if perm_betas.size>0 else None,
                      float(np.std(perm_betas)) if perm_betas.size>0 else None,
                      p_emp, N_PERM, max_smd)
+    # segna la variante come completata
+    reset_variant_in_progress(conn, variant_original, success=True)
     conn.close()
+
     return variant_original

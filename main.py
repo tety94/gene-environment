@@ -4,7 +4,7 @@ from data_loader import load_and_prepare_data
 from modeling import process_single_variant
 from utils import add_fdr, volcano_plot
 from config import MAX_WORKERS, PVALUE_THRESHOLD, N_PERM_HIGH
-from db import load_variant_results, get_conn, delete_variants, insert_new_variants
+from db import load_variant_results, get_conn, delete_variants, insert_new_variants, variant_already_done
 import config
 
 #todo: valutare split in discovery replication ed eventualmente valutare solo il beta concorde
@@ -46,7 +46,14 @@ def main():
     insert_new_variants(variants_to_insert)
 
     # ---------- PRIMO RUN ----------
-    run_parallel_processing(variant_cols_safe, mapping, Ecols, description="primo run con permutazioni standard")
+    conn = get_conn()
+    variants_to_run = [
+        v_safe for v_safe in variant_cols_safe
+        if not variant_already_done(conn, mapping[v_safe])
+    ]
+    conn.close()
+
+    run_parallel_processing(variants_to_run, mapping, Ecols, description="primo run con permutazioni standard")
 
     # ---------- CARICA RISULTATI E PLOT ----------
     results_df = load_variant_results()

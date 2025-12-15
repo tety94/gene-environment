@@ -19,10 +19,19 @@ def get_conn():
 
 def variant_already_done(conn, variant):
     cur = conn.cursor()
-    cur.execute("SELECT variant FROM variant_results WHERE variant=%s AND completed=1", (variant,))
+    cur.execute("""
+        SELECT completed, in_progress 
+        FROM variant_results 
+        WHERE variant=%s
+    """, (variant,))
     r = cur.fetchone()
     cur.close()
-    return r is not None
+
+    if r is None:
+        return False  # variante non presente → da lanciare
+    completed, in_progress = r
+    return completed or in_progress  # se completata o in elaborazione → NON lanciare
+
 
 def get_empty_variants_gene():
     conn = get_conn()
@@ -130,10 +139,15 @@ def insert_new_variants(variants):
         VALUES (%s,%s,%s,%s,0,0)
         ON DUPLICATE KEY UPDATE variant=variant
         """
-        data = [
-            (v["variant"], v.get("chromosome"), v.get("position"), v.get("mutation"))
-            for v in variants
-        ]
+        data = []
+        for v in variants:
+            chrom = v.get("chromosome")
+            # se chromosome è un numero valido lo converte a int, altrimenti lascia None
+            chrom = int(chrom) if chrom is not None and str(chrom).isdigit() else None
+            pos = v.get("position")
+            pos = int(pos) if pos is not None and str(pos).isdigit() else None
+            data.append((v["variant"], chrom, pos, v.get("mutation")))
+
         cursor.executemany(sql, data)
         conn.commit()
         print(f"[INFO] Inserite/aggiornate {cursor.rowcount} varianti nel DB")
@@ -142,3 +156,43 @@ def insert_new_variants(variants):
         conn.close()
 
     return cursor.rowcount
+
+def mark_variant_in_progress(conn, variant):
+    """
+    Segna una variante come in progress.
+    Ritorna True se è stata aggiornata (quindi può essere elaborata), False se qualcun altro l'ha già presa.
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            UPDATE variant_results
+            SET in_progress=1
+            WHERE variant=%s AND completed=0 AND in_progress=0
+        """, (variant,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        cur.close()
+
+def reset_variant_in_progress(conn, variant, success=True):
+    """
+    Resetta lo stato di in_progress.
+    Se success=True, imposta anche completed=1.
+    """
+    cur = conn.cursor()
+    try:
+        if success:
+            cur.execute("""
+                UPDATE variant_results
+                SET completed=1, in_progress=0
+                WHERE variant=%s
+            """, (variant,))
+        else:
+            cur.execute("""
+                UPDATE variant_results
+                SET in_progress=0
+                WHERE variant=%s
+            """, (variant,))
+        conn.commit()
+    finally:
+        cur.close()
