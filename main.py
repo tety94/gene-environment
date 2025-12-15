@@ -6,6 +6,7 @@ from utils import add_fdr, volcano_plot
 from config import MAX_WORKERS, PVALUE_THRESHOLD, N_PERM_HIGH
 from db import load_variant_results, get_conn, delete_variants, insert_new_variants, get_variants_to_run
 import config
+import random
 
 #todo: valutare split in discovery replication ed eventualmente valutare solo il beta concorde
 #todo: selezionare le varienti in base al linkage disequilibrium
@@ -47,6 +48,7 @@ def main():
 
     # ---------- PRIMO RUN ----------
     variants_to_run = get_variants_to_run(mapping, variant_cols_safe)
+    random.shuffle(variants_to_run)
 
     run_parallel_processing(variants_to_run, mapping, Ecols, description="primo run con permutazioni standard")
 
@@ -68,7 +70,7 @@ def main():
 
         # Aggiorna temporaneamente il numero di permutazioni
         config.N_PERM = N_PERM_HIGH
-
+        random.shuffle(sig_variants)
         run_parallel_processing(sig_variants, mapping, Ecols, description=f"secondo run con {N_PERM_HIGH} permutazioni")
 
         # ricarica risultati finali
