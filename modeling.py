@@ -27,14 +27,15 @@ def process_single_variant(variant_col, variant_original, Ecols):
     df = pickle.load(open("temp_df.pkl", "rb"))
     conn = get_conn()
 
-    if not mark_variant_in_progress(conn, variant_original):
-        print(f"[INFO] Return 1: {variant_original} già in progress")
-        # qualcun altro la sta già processando
+    # 1️⃣ Controllo se è già completata
+    if variant_already_done(conn, variant_original):
+        print(f"[INFO] Return: {variant_original} già calcolata")
         conn.close()
         return None
 
-    if variant_already_done(conn, variant_original):
-        print(f"[INFO] Return 2: {variant_original} già calcolata")
+    # 2️⃣ Segno come in progress
+    if not mark_variant_in_progress(conn, variant_original):
+        print(f"[INFO] Return: {variant_original} già in progress da un altro processo")
         conn.close()
         return None
 
