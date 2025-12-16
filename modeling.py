@@ -21,7 +21,7 @@ def _find_interaction_term(mod_params_index, variant_col):
     return None
 
 def save_variant_result_not_calculated(conn, variant_original, muted, not_muted, max_smd =None):
-    save_variant_result(conn, variant_original, muted,not_muted, None, None, None, 1, None, max_smd)
+    save_variant_result(conn, variant_original, muted,not_muted, None, None, None, 1, N_PERM, max_smd)
 
 def process_single_variant(variant_col, variant_original, Ecols):
     df = pickle.load(open("temp_df.pkl", "rb"))
