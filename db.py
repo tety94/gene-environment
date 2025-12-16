@@ -144,8 +144,8 @@ def insert_new_variants(variants):
     try:
         sql = """
         INSERT INTO variant_results 
-            (variant, chromosome, position, mutation, completed, in_progress)
-        VALUES (%s,%s,%s,%s,0,0)
+            (variant, chromosome, position, mutation, exposure, completed, in_progress)
+        VALUES (%s,%s,%s,%s,%s,0,0)
         ON DUPLICATE KEY UPDATE variant=variant
         """
         data = []
@@ -155,7 +155,7 @@ def insert_new_variants(variants):
             chrom = int(chrom) if chrom is not None and str(chrom).isdigit() else None
             pos = v.get("position")
             pos = int(pos) if pos is not None and str(pos).isdigit() else None
-            data.append((v["variant"], chrom, pos, v.get("mutation")))
+            data.append((v["variant"], chrom, pos, v.get("mutation"), EXPOSURE))
 
         cursor.executemany(sql, data)
         conn.commit()
