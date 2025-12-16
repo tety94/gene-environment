@@ -93,7 +93,7 @@ def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, 
             safe_val(mean_coef),
             safe_val(sd_coef),
             safe_val(empirical_p),
-            iterations,
+            safe_val(iterations),
             safe_val(balance),
             EXPOSURE
         ))

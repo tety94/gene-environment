@@ -80,7 +80,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
         save_variant_result(conn, variant_original,
                             int(matched_obs[variant_col].sum()),
                             int((matched_obs[variant_col] == 0).sum()),
-                            obs_coef, None, None, 1, None, max_smd)
+                            obs_coef, None, None, 1, N_PERM, max_smd)
         conn.close()
         return variant_original
 
