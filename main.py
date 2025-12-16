@@ -63,10 +63,6 @@ def main():
     print(f"[INFO] Numero di geni significativi (p<{PVALUE_THRESHOLD}): {len(sig_variants)}")
 
     if sig_variants:
-        # cancella dal DB i geni significativi
-        conn = get_conn()
-        delete_variants(conn, sig_variants)
-        conn.close()
 
         # Aggiorna temporaneamente il numero di permutazioni
         config.N_PERM = N_PERM_HIGH
