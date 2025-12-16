@@ -40,7 +40,7 @@ def get_empty_variants_gene():
     try:
         cur.execute("SELECT variant, mutation, position, chromosome FROM variant_results WHERE gene IS NULL AND empirical_p < 0.05")
         rows = cur.fetchall()
-        df = pd.DataFrame(rows, columns=["variant", "mutatio", "position", "chromosome"])
+        df = pd.DataFrame(rows, columns=["variant", "mutation", "position", "chromosome"])
     finally:
         cur.close()
         conn.close()

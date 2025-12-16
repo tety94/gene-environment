@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from sklearn.preprocessing import StandardScaler
-from config import RAW_FILE, ENV_FILE, SEP, DECIMAL, EXPOSURES, STANDARDIZE, ONSET_COL
+from config import RAW_FILE, ENV_FILE, SEP, DECIMAL, EXPOSURES, STANDARDIZE, TARGET_COL
 
 def load_and_prepare_data():
     # ---------- LOAD GENETIC ----------
@@ -30,18 +30,17 @@ def load_and_prepare_data():
 
     print(f"[START] Merge file gene - ambiente: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     df = pd.merge(df_env, df_gen, on="id", how="inner")
-    df[ONSET_COL] = pd.to_numeric(df[ONSET_COL], errors="coerce")
+    df[TARGET_COL] = pd.to_numeric(df[TARGET_COL], errors="coerce")
 
     # ---------- STANDARDIZE ----------
     print(f"[START] Inizio standardizzazione: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     Ecols = []
-    for exp in EXPOSURES:
-        df[exp] = pd.to_numeric(df[exp], errors="coerce")
-        if STANDARDIZE:
-            df[exp + "_std"] = StandardScaler().fit_transform(df[[exp]])
-            Ecols.append(exp + "_std")
-        else:
-            Ecols.append(exp)
+    df[EXPOSURES] = pd.to_numeric(df[EXPOSURES], errors="coerce")
+    if STANDARDIZE:
+        df[EXPOSURES + "_std"] = StandardScaler().fit_transform(df[[EXPOSURES]])
+        Ecols.append(EXPOSURES + "_std")
+    else:
+        Ecols.append(EXPOSURES)
 
     # ---------- SAFE GENE NAMES ----------
     print(f"[START] Creo dizionario per salvare i nomi delle variabili: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

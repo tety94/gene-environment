@@ -8,8 +8,8 @@ TEMP_DF_PATH = ""
 # DATA SETTINGS
 SEP = ';'
 DECIMAL = '.'
-ONSET_COL = "onset_age"
-EXPOSURES = [""]
+TARGET_COL = "onset_age"
+EXPOSURES = ""
 COVARIATES = ["sex"]
 
 # MATCHING

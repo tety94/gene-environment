@@ -2,7 +2,7 @@ import statsmodels.formula.api as smf
 import numpy as np
 import pickle
 from tqdm import tqdm
-from config import ONSET_COL, MATCH_K, MIN_TREATED, MIN_SAMPLE_SIZE, N_PERM, RANDOM_STATE, MIN_OBS_COEF
+from config import TARGET_COL, MATCH_K, MIN_TREATED, MIN_SAMPLE_SIZE, N_PERM, RANDOM_STATE, MIN_OBS_COEF
 from db import save_variant_result, variant_already_done, get_conn, mark_variant_in_progress, reset_variant_in_progress
 from matching import match_control_units, check_balance
 
@@ -41,7 +41,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
         conn.close()
         return None
 
-    cols = [ONSET_COL, variant_col] + Ecols
+    cols = [TARGET_COL, variant_col] + Ecols
     df_model = df[cols].dropna()
     if df_model.shape[0] < MIN_SAMPLE_SIZE:
         print(f"[INFO] Return 4: {variant_original} numero insufficiente")
@@ -67,7 +67,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
         conn.close()
         return variant_original
 
-    formula = build_formula(ONSET_COL, variant_col, Ecols, [], matched_obs)
+    formula = build_formula(TARGET_COL, variant_col, Ecols, [], matched_obs)
     mod = smf.ols(formula=formula, data=matched_obs).fit()
     interaction_name = _find_interaction_term(mod.params.index, variant_col)
     if interaction_name is None:
