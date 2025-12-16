@@ -222,7 +222,7 @@ def get_variants_to_run(variant_original_list):
     cur.execute("""
         SELECT variant 
         FROM variant_results 
-        WHERE completed=0 AND in_progress=0 AND exposure=%s AND iterations=%s
+        WHERE (completed=1 OR in_progress=1) AND exposure=%s AND iterations=%s
     """, (EXPOSURE, N_PERM))
     done_variants = set(row[0] for row in cur.fetchall())
 
