@@ -215,7 +215,7 @@ def safe_val(x):
         return None
     return x
 
-def get_variants_to_run():
+def get_variants_to_run(variant_original_list):
     conn = get_conn()
     cur = conn.cursor()
 
@@ -224,9 +224,13 @@ def get_variants_to_run():
         FROM variant_results 
         WHERE completed=0 AND in_progress=0 AND exposure=%s AND iterations=%s
     """, (EXPOSURE, N_PERM))
-    variants_to_run = [row[0] for row in cur.fetchall()]
+    done_variants = set(row[0] for row in cur.fetchall())
+
     cur.close()
     conn.close()
+
+    # Filtra le varianti
+    variants_to_run = [v for v in variant_original_list if v not in done_variants]
 
     print(f"[INFO] Varianti da processare: {len(variants_to_run)}")
     return variants_to_run
