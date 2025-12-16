@@ -1,6 +1,6 @@
 # db.py
 import mysql.connector
-from config import DB_USER, DB_PASSWORD, DB_NAME, DB_HOST, DB_PORT, EXPOSURE, N_PERM_HIGH
+from config import DB_USER, DB_PASSWORD, DB_NAME, DB_HOST, DB_PORT, EXPOSURE, N_PERM_HIGH, PVALUE_THRESHOLD
 import pandas as pd
 import math
 import numpy as np
@@ -36,7 +36,9 @@ def get_empty_variants_gene():
     conn = get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT variant, mutation, position, chromosome FROM variant_results WHERE gene IS NULL AND empirical_p < 0.05")
+        cur.execute("SELECT variant, mutation, position, chromosome FROM variant_results "
+                    " WHERE gene IS NULL AND empirical_p < %s AND iterations = %s",
+                    (PVALUE_THRESHOLD, N_PERM_HIGH))
         rows = cur.fetchall()
         df = pd.DataFrame(rows, columns=["variant", "mutation", "position", "chromosome"])
     finally:
@@ -213,12 +215,10 @@ def safe_val(x):
         return None
     return x
 
-def get_variants_to_run(mapping, variant_cols_safe):
-    # Connessione al DB
+def get_variants_to_run(variant_original_list):
     conn = get_conn()
     cur = conn.cursor()
 
-    # Recupera tutte le varianti già completate o in progress
     cur.execute("""
         SELECT variant 
         FROM variant_results 
@@ -229,8 +229,9 @@ def get_variants_to_run(mapping, variant_cols_safe):
     cur.close()
     conn.close()
 
-    # Filtra le varianti da processare
-    variants_to_run = [v_safe for v_safe in variant_cols_safe if mapping[v_safe] not in done_variants]
+    # Filtra le varianti
+    variants_to_run = [v for v in variant_original_list if v not in done_variants]
 
     print(f"[INFO] Varianti da processare: {len(variants_to_run)}")
     return variants_to_run
+
