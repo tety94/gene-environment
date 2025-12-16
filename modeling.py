@@ -119,6 +119,14 @@ def process_single_variant(variant_col, variant_original, Ecols):
         unique_ratio = len(np.unique(np.round(perm_betas_light, 6))) / perm_betas_light.size
         if unique_ratio < 0.05:
             print(f"[INFO] Permutation space saturated for {variant_original}, skipping HIGH")
+            save_variant_result(conn, variant_original,
+                                int(matched_obs[variant_col].sum()),
+                                int((matched_obs[variant_col] == 0).sum()),
+                                obs_coef,
+                                float(np.mean(perm_betas_light)) if perm_betas_light.size > 0 else None,
+                                float(np.std(perm_betas_light)) if perm_betas_light.size > 0 else None,
+                                p_emp_light, N_PERM_HIGH, max_smd
+                                )
             reset_variant_in_progress(conn, variant_original, success=True)
             conn.close()
             return variant_original
