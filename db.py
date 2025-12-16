@@ -215,23 +215,36 @@ def safe_val(x):
         return None
     return x
 
-def get_variants_to_run(variant_original_list):
+def get_variants_to_run(mapping, variant_cols_safe):
+    """
+    Restituisce la lista delle varianti safe da processare,
+    escludendo quelle già completate o in progress nel DB.
+
+    mapping: dict originale -> safe (es. 'chr1:123A>G' -> 'variant_0')
+    variant_cols_safe: lista di colonne safe del DF
+    """
     conn = get_conn()
     cur = conn.cursor()
 
     cur.execute("""
         SELECT variant 
         FROM variant_results 
-        WHERE (completed=1 OR in_progress=1) AND exposure=%s AND iterations=%s
+        WHERE (completed=1 OR in_progress=1) 
+          AND exposure=%s 
+          AND iterations=%s
     """, (EXPOSURE, N_PERM))
+
     done_variants = set(row[0] for row in cur.fetchall())
+    print(f"[INFO] done_variants dal DB: {len(done_variants)}")
 
     cur.close()
     conn.close()
 
-    # Filtra le varianti
-    variants_to_run = [v for v in variant_original_list if v not in done_variants]
+    # Converti i nomi originali in safe usando il mapping
+    done_variants_safe = {mapping[v] for v in done_variants if v in mapping}
+
+    # Filtra le varianti da processare
+    variants_to_run = [v for v in variant_cols_safe if v not in done_variants_safe]
 
     print(f"[INFO] Varianti da processare: {len(variants_to_run)}")
     return variants_to_run
-

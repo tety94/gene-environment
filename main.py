@@ -46,7 +46,7 @@ def main():
     # Inserisci nel DB
     insert_new_variants(variants_to_insert)
 
-    variants_to_run = get_variants_to_run(variant_cols_safe)
+    variants_to_run = get_variants_to_run(mapping, variant_cols_safe)
     random.shuffle(variants_to_run)
     run_parallel_processing(variants_to_run, mapping, Ecols, description="primo run con permutazioni standard")
 
