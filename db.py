@@ -1,6 +1,6 @@
 # db.py
 import mysql.connector
-from config import DB_USER, DB_PASSWORD, DB_NAME, DB_HOST, DB_PORT, EXPOSURE
+from config import DB_USER, DB_PASSWORD, DB_NAME, DB_HOST, DB_PORT, EXPOSURE, N_PERM_HIGH
 import pandas as pd
 import math
 import numpy as np
@@ -102,7 +102,8 @@ def load_variant_results():
     conn = get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT variant, obs_coef, empirical_p FROM variant_results WHERE completed=1")
+        cur.execute("SELECT variant, obs_coef, empirical_p FROM variant_results WHERE exposure=%s AND completed=1 AND iterations =%s",
+                    (EXPOSURE, N_PERM_HIGH))
         rows = cur.fetchall()
         # costruisci DataFrame manualmente
         df = pd.DataFrame(rows, columns=["variant", "obs_coef", "empirical_p"])

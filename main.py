@@ -46,34 +46,16 @@ def main():
     # Inserisci nel DB
     insert_new_variants(variants_to_insert)
 
-    # ---------- PRIMO RUN ----------
     variants_to_run = get_variants_to_run(mapping, variant_cols_safe)
     random.shuffle(variants_to_run)
-
     run_parallel_processing(variants_to_run, mapping, Ecols, description="primo run con permutazioni standard")
 
     # ---------- CARICA RISULTATI E PLOT ----------
+    # ricarica risultati finali
     results_df = load_variant_results()
     results_df = add_fdr(results_df)
-    volcano_plot(results_df, save_path="volcano_plot.png")
-
-    # ---------- FILTRO RISULTATI SIGNIFICATIVI ----------
-    sig_variants_df = results_df[results_df['empirical_p'] < PVALUE_THRESHOLD]
-    sig_variants = sig_variants_df['variant'].tolist()
-    print(f"[INFO] Numero di geni significativi (p<{PVALUE_THRESHOLD}): {len(sig_variants)}")
-
-    if sig_variants:
-
-        # Aggiorna temporaneamente il numero di permutazioni
-        config.N_PERM = N_PERM_HIGH
-        random.shuffle(sig_variants)
-        run_parallel_processing(sig_variants, mapping, Ecols, description=f"secondo run con {N_PERM_HIGH} permutazioni")
-
-        # ricarica risultati finali
-        results_df = load_variant_results()
-        results_df = add_fdr(results_df)
-        volcano_plot(results_df, save_path="volcano_plot_final.png")
-        print(f"[INFO] Test permutazioni avanzate completato. Volcano plot finale salvato.")
+    volcano_plot(results_df, save_path="volcano_plot_final.png")
+    print(f"[INFO] Test permutazioni avanzate completato. Volcano plot finale salvato.")
 
     end_time = datetime.now()
     duration = end_time - start_time
