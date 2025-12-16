@@ -22,6 +22,7 @@ def _find_interaction_term(mod_params_index, variant_col):
 
 def save_variant_result_not_calculated(conn, variant_original, muted, not_muted, max_smd =None):
     save_variant_result(conn, variant_original, muted,not_muted, None, None, None, 1, N_PERM, max_smd)
+    reset_variant_in_progress(conn, variant_original, success=True)
 
 def process_single_variant(variant_col, variant_original, Ecols):
     df = pickle.load(open("temp_df.pkl", "rb"))
@@ -81,6 +82,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
                             int(matched_obs[variant_col].sum()),
                             int((matched_obs[variant_col] == 0).sum()),
                             obs_coef, None, None, 1, N_PERM, max_smd)
+        reset_variant_in_progress(conn, variant_original, success=True)
         conn.close()
         return variant_original
 
@@ -110,6 +112,16 @@ def process_single_variant(variant_col, variant_original, Ecols):
                         float(np.std(perm_betas_light)) if perm_betas_light.size > 0 else None,
                         p_emp_light, N_PERM, max_smd
                         )
+
+    perm_betas_light = np.array([x for x in perm_betas_light if not np.isnan(x)])
+
+    if perm_betas_light.size > 50:
+        unique_ratio = len(np.unique(np.round(perm_betas_light, 6))) / perm_betas_light.size
+        if unique_ratio < 0.05:
+            print(f"[INFO] Permutation space saturated for {variant_original}, skipping HIGH")
+            reset_variant_in_progress(conn, variant_original, success=True)
+            conn.close()
+            return variant_original
 
     # ---------- PERMUTAZIONI HIGH SOLO SE SIGNIFICATIVO ----------
     if(p_emp_light < PVALUE_THRESHOLD):
