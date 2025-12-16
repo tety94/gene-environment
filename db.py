@@ -1,6 +1,6 @@
 # db.py
 import mysql.connector
-from config import DB_USER, DB_PASSWORD, DB_NAME, DB_HOST, DB_PORT, EXPOSURE, N_PERM_HIGH, PVALUE_THRESHOLD
+from config import DB_USER, DB_PASSWORD, DB_NAME, DB_HOST, DB_PORT, EXPOSURE, N_PERM_HIGH, PVALUE_THRESHOLD, N_PERM
 import pandas as pd
 import math
 import numpy as np
@@ -144,8 +144,8 @@ def insert_new_variants(variants):
     try:
         sql = """
         INSERT INTO variant_results 
-            (variant, chromosome, position, mutation, exposure, completed, in_progress)
-        VALUES (%s,%s,%s,%s,%s,0,0)
+            (variant, chromosome, position, mutation, exposure, completed, in_progress, iterations)
+        VALUES (%s,%s,%s,%s,%s,0,0, %s)
         ON DUPLICATE KEY UPDATE variant=variant
         """
         data = []
@@ -155,7 +155,7 @@ def insert_new_variants(variants):
             chrom = int(chrom) if chrom is not None and str(chrom).isdigit() else None
             pos = v.get("position")
             pos = int(pos) if pos is not None and str(pos).isdigit() else None
-            data.append((v["variant"], chrom, pos, v.get("mutation"), EXPOSURE))
+            data.append((v["variant"], chrom, pos, v.get("mutation"), EXPOSURE, N_PERM))
 
         cursor.executemany(sql, data)
         conn.commit()
