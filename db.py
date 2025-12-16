@@ -1,13 +1,11 @@
 # db.py
 import mysql.connector
-from mysql.connector import pooling
-from config import DB_USER, DB_PASSWORD, DB_NAME, DB_HOST, DB_PORT
+from config import DB_USER, DB_PASSWORD, DB_NAME, DB_HOST, DB_PORT, EXPOSURE
 import pandas as pd
 import math
 import numpy as np
 
 def get_conn():
-    """Crea una connessione nuova (ogni processo ne avrà una)"""
     conn = mysql.connector.connect(
         host=DB_HOST,
         port=DB_PORT,
@@ -69,9 +67,9 @@ def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, 
         cur.execute("""
             INSERT INTO variant_results (
                 variant, gene, chromosome, position, mutation, mutati, non_mutati, obs_coef, mean_coef, 
-                sd_coef, empirical_p, iterations, balance, completed 
+                sd_coef, empirical_p, iterations, balance, exposure, completed 
             )
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1)
             ON DUPLICATE KEY UPDATE 
                 gene=VALUES(gene),
                 chromosome=VALUES(chromosome),
@@ -85,6 +83,7 @@ def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, 
                 empirical_p=VALUES(empirical_p),
                 iterations=VALUES(iterations),
                 balance=VALUES(balance),
+                exposure=VALUES(exposure),
                 completed=1
         """, (
             variant, gene, chromosome, position, mutation, mutati, non_mutati,
@@ -93,7 +92,8 @@ def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, 
             safe_val(sd_coef),
             safe_val(empirical_p),
             iterations,
-            safe_val(balance)
+            safe_val(balance),
+            EXPOSURE
         ))
     finally:
         cur.close()

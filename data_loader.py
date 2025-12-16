@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from sklearn.preprocessing import StandardScaler
-from config import RAW_FILE, ENV_FILE, SEP, DECIMAL, EXPOSURES, STANDARDIZE, TARGET_COL
+from config import RAW_FILE, ENV_FILE, SEP, DECIMAL, EXPOSURE, STANDARDIZE, TARGET_COL
 
 def load_and_prepare_data():
     # ---------- LOAD GENETIC ----------
@@ -35,12 +35,12 @@ def load_and_prepare_data():
     # ---------- STANDARDIZE ----------
     print(f"[START] Inizio standardizzazione: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     Ecols = []
-    df[EXPOSURES] = pd.to_numeric(df[EXPOSURES], errors="coerce")
+    df[EXPOSURE] = pd.to_numeric(df[EXPOSURE], errors="coerce")
     if STANDARDIZE:
-        df[EXPOSURES + "_std"] = StandardScaler().fit_transform(df[[EXPOSURES]])
-        Ecols.append(EXPOSURES + "_std")
+        df[EXPOSURE + "_std"] = StandardScaler().fit_transform(df[[EXPOSURE]])
+        Ecols.append(EXPOSURE + "_std")
     else:
-        Ecols.append(EXPOSURES)
+        Ecols.append(EXPOSURE)
 
     # ---------- SAFE GENE NAMES ----------
     print(f"[START] Creo dizionario per salvare i nomi delle variabili: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

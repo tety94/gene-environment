@@ -9,7 +9,7 @@ TEMP_DF_PATH = ""
 SEP = ';'
 DECIMAL = '.'
 TARGET_COL = "onset_age"
-EXPOSURES = ""
+EXPOSURE = ""
 COVARIATES = ["sex"]
 
 # MATCHING
