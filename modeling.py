@@ -112,34 +112,35 @@ def process_single_variant(variant_col, variant_original, Ecols):
                         )
 
     # ---------- PERMUTAZIONI HIGH SOLO SE SIGNIFICATIVO ----------
-    # Numero di permutazioni aggiuntive da calcolare
-    n_additional = N_PERM_HIGH - N_PERM
-    perm_betas_additional = []
+    if(p_emp_light < PVALUE_THRESHOLD):
+        # Numero di permutazioni aggiuntive da calcolare
+        n_additional = N_PERM_HIGH - N_PERM
+        perm_betas_additional = []
 
-    for _ in tqdm(range(n_additional), desc=f"Perm test ADD {variant_col}", leave=False):
-        df_perm = df_model.copy()
-        df_perm[variant_col] = rng.permutation(df_perm[variant_col].values)
-        matched_perm = match_control_units(df_perm, variant_col, k=MATCH_K, covariates_for_matching=cov_match)
-        if matched_perm is None or matched_perm.shape[0] < MIN_SAMPLE_SIZE:
-            perm_betas_additional.append(np.nan)
-            continue
-        mod_perm = smf.ols(formula=formula, data=matched_perm).fit()
-        perm_betas_additional.append(mod_perm.params.get(interaction_name, np.nan))
+        for _ in tqdm(range(n_additional), desc=f"Perm test ADD {variant_col}", leave=False):
+            df_perm = df_model.copy()
+            df_perm[variant_col] = rng.permutation(df_perm[variant_col].values)
+            matched_perm = match_control_units(df_perm, variant_col, k=MATCH_K, covariates_for_matching=cov_match)
+            if matched_perm is None or matched_perm.shape[0] < MIN_SAMPLE_SIZE:
+                perm_betas_additional.append(np.nan)
+                continue
+            mod_perm = smf.ols(formula=formula, data=matched_perm).fit()
+            perm_betas_additional.append(mod_perm.params.get(interaction_name, np.nan))
 
-    # Combina i risultati con quelli light
-    perm_betas_high = np.concatenate([perm_betas_light, perm_betas_additional])
-    perm_betas_high = np.array([x for x in perm_betas_high if not np.isnan(x)])
-    p_emp_high = float(np.mean(np.abs(perm_betas_high) >= np.abs(obs_coef))) if perm_betas_high.size > 0 else None
+        # Combina i risultati con quelli light
+        perm_betas_high = np.concatenate([perm_betas_light, perm_betas_additional])
+        perm_betas_high = np.array([x for x in perm_betas_high if not np.isnan(x)])
+        p_emp_high = float(np.mean(np.abs(perm_betas_high) >= np.abs(obs_coef))) if perm_betas_high.size > 0 else None
 
-    # Aggiorna risultato finale
-    save_variant_result(conn, variant_original,
-                            int(matched_obs[variant_col].sum()),
-                            int((matched_obs[variant_col] == 0).sum()),
-                            obs_coef,
-                            float(np.mean(perm_betas_high)) if perm_betas_high.size > 0 else None,
-                            float(np.std(perm_betas_high)) if perm_betas_high.size > 0 else None,
-                            p_emp_high, N_PERM_HIGH, max_smd
-                        )
+        # Aggiorna risultato finale
+        save_variant_result(conn, variant_original,
+                                int(matched_obs[variant_col].sum()),
+                                int((matched_obs[variant_col] == 0).sum()),
+                                obs_coef,
+                                float(np.mean(perm_betas_high)) if perm_betas_high.size > 0 else None,
+                                float(np.std(perm_betas_high)) if perm_betas_high.size > 0 else None,
+                                p_emp_high, N_PERM_HIGH, max_smd
+                            )
 
     # Segna la variante come completata
     reset_variant_in_progress(conn, variant_original, success=True)
