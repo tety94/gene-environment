@@ -1,7 +1,8 @@
 import requests
-from config import GTEX_REST
 
 class GTExAPI:
+
+    GTEX_REST = "https://gtexportal.org/api/v2"
 
     @staticmethod
     def get_brain_expression(gene_symbol: str):
@@ -10,7 +11,7 @@ class GTExAPI:
         - expressed_brain: True/False
         - tissues: lista di tessuti cerebrali
         """
-        url = f"{GTEX_REST}/expression/geneExpression"
+        url = f"{GTExAPI.GTEX_REST}/expression/geneExpression"
         params = {
             "gencodeId": gene_symbol,  # o usare geneSymbol, da verificare
             "format": "json"

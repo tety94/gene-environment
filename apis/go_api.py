@@ -1,14 +1,14 @@
 import requests
-from config import GO_REST
-from apis.ensembl_api import EnsemblAPI
 
 #GENE ONTOLOGY API
 class GOAPI:
 
+    GO_REST = "https://www.ebi.ac.uk/QuickGO/services"
+
     @staticmethod
     def get_go_terms(uniprot: str) -> dict:
 
-        url = f"{GO_REST}/annotation/search"
+        url = f"{GOAPI.GO_REST}/annotation/search"
         params = {
             "geneProductId": uniprot,
             "limit": 100

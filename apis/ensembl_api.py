@@ -1,14 +1,14 @@
 import requests
 import requests
-from config import ENSEMBL_REST
 
 class EnsemblAPI:
 
     HEADERS = {"Content-Type": "application/json"}
+    ENSEMBL_REST = "https://rest.ensembl.org"
 
     @staticmethod
     def get_gene_info(ensg_id: str) -> dict:
-        url = f"{ENSEMBL_REST}/lookup/id/{ensg_id}"
+        url = f"{EnsemblAPI.ENSEMBL_REST}/lookup/id/{ensg_id}"
         r = requests.get(url, headers=EnsemblAPI.HEADERS)
         if not r.ok:
             return {}
@@ -26,7 +26,7 @@ class EnsemblAPI:
         """
         Fetches gene information based on chromosome and position.
         """
-        url = f"{ENSEMBL_REST}/overlap/region/human/{chrom}:{pos}-{pos}?feature=gene"
+        url = f"{EnsemblAPI.ENSEMBL_REST}/overlap/region/human/{chrom}:{pos}-{pos}?feature=gene"
         try:
             r = requests.get(url, headers=EnsemblAPI.HEADERS)
             r.raise_for_status()
@@ -45,7 +45,7 @@ class EnsemblAPI:
         """
         Get coordinates (chrom, start, end) for a given variant.
         """
-        url = f"{ENSEMBL_REST}/lookup/symbol/homo_sapiens/{variant}?content-type=application/json"
+        url = f"{EnsemblAPI.ENSEMBL_REST}/lookup/symbol/homo_sapiens/{variant}?content-type=application/json"
         try:
             r = requests.get(url, headers=EnsemblAPI.HEADERS)
             r.raise_for_status()
