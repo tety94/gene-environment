@@ -3,8 +3,8 @@ from datetime import datetime
 from data_loader import load_and_prepare_data
 from modeling import process_single_variant
 from utils import add_fdr, volcano_plot
-from config import MAX_WORKERS, PVALUE_THRESHOLD, N_PERM_HIGH
-from db import load_variant_results, get_conn, delete_variants, insert_new_variants, get_variants_to_run
+from config import MAX_WORKERS
+from db import load_variant_results, insert_new_variants, get_variants_to_run
 import config
 import random
 

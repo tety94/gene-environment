@@ -41,3 +41,8 @@ N_PERM_HIGH = 10000        # numero permutazioni per il secondo run
 VFC_FOLDERS = []
 NULL_PRECENTAGE = 0.30
 OUTPUT_FOLDER = ''
+
+ENSEMBL_REST = "https://rest.ensembl.org"
+GTEX_REST = "https://gtexportal.org/api/v2"
+GO_REST = "https://www.ebi.ac.uk/QuickGO/services"
+CTD_BASE_URL = "http://ctdbase.org/reports"

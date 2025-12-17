@@ -5,6 +5,7 @@ import pandas as pd
 import math
 import numpy as np
 
+
 def get_conn():
     conn = mysql.connector.connect(
         host=DB_HOST,
@@ -15,6 +16,7 @@ def get_conn():
         autocommit=True
     )
     return conn
+
 
 def variant_already_done(conn, variant):
     cur = conn.cursor()
@@ -46,6 +48,7 @@ def get_empty_variants_gene():
         conn.close()
     return df
 
+
 def update_variant_gene(conn, variant, gene_id, gene_name):
     cur = conn.cursor()
     cur.execute("""
@@ -56,7 +59,9 @@ def update_variant_gene(conn, variant, gene_id, gene_name):
     conn.commit()
     cur.close()
 
-def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p, iterations, balance):
+
+def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, sd_coef, empirical_p, iterations,
+                        balance):
     cur = conn.cursor()
 
     parts = variant.split("_", 2)  # split massimo 2, così l'ultima parte resta tutta la mutazione
@@ -100,12 +105,14 @@ def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, 
     finally:
         cur.close()
 
+
 def load_variant_results():
     conn = get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT variant, obs_coef, empirical_p FROM variant_results WHERE exposure=%s AND completed=1 AND iterations =%s",
-                    (EXPOSURE, N_PERM_HIGH))
+        cur.execute(
+            "SELECT variant, obs_coef, empirical_p FROM variant_results WHERE exposure=%s AND completed=1 AND iterations =%s",
+            (EXPOSURE, N_PERM_HIGH))
         rows = cur.fetchall()
         # costruisci DataFrame manualmente
         df = pd.DataFrame(rows, columns=["variant", "obs_coef", "empirical_p"])
@@ -113,6 +120,7 @@ def load_variant_results():
         cur.close()
         conn.close()
     return df
+
 
 def delete_variants(conn, variant_list):
     if not variant_list:
@@ -166,6 +174,7 @@ def insert_new_variants(variants):
 
     return cursor.rowcount
 
+
 def mark_variant_in_progress(conn, variant):
     """
     Segna una variante come in progress.
@@ -182,6 +191,7 @@ def mark_variant_in_progress(conn, variant):
         return cur.rowcount > 0
     finally:
         cur.close()
+
 
 def reset_variant_in_progress(conn, variant, success=True):
     """
@@ -205,6 +215,7 @@ def reset_variant_in_progress(conn, variant, success=True):
         conn.commit()
     finally:
         cur.close()
+
 
 def safe_val(x):
     if x is None:
@@ -250,3 +261,100 @@ def get_variants_to_run(mapping, variant_cols_safe):
 
     print(f"[INFO] Varianti da processare: {len(variants_to_run)}")
     return variants_to_run
+
+
+def get_genes_to_annotate():
+    """
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+SELECT distinct vr.gene
+FROM variant_results vr 
+LEFT JOIN gene_neuro_annotation gna 
+	ON vr.gene = gna.gene_id 
+where vr.gene is not null and vr.gene != 'NO-GENE'
+and gna.gene_id IS NULL     
+    """)
+
+    genes = [row[0] for row in cur.fetchall()]
+
+    cur.close()
+    conn.close()
+
+    return genes
+
+
+# GESTIONE GENI
+def upsert_gene_neuro_annotation(data: dict):
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+
+    sql = """
+    INSERT INTO gene_neuro_annotation (
+        gene_id,
+        gene_symbol,
+        gene_type,
+        expressed_brain,
+        brain_tissues,
+        expressed_neurons,
+        expressed_glia,
+        cell_types,
+        go_neuro_processes,
+        go_toxic_response,
+        ctd_chemicals,
+        ctd_neuro_diseases,
+        neuro_plausibility_score
+    ) VALUES (
+        %(gene_id)s,
+        %(gene_symbol)s,
+        %(gene_type)s,
+        %(expressed_brain)s,
+        %(brain_tissues)s,
+        %(expressed_neurons)s,
+        %(expressed_glia)s,
+        %(cell_types)s,
+        %(go_neuro_processes)s,
+        %(go_toxic_response)s,
+        %(ctd_chemicals)s,
+        %(ctd_neuro_diseases)s,
+        %(neuro_plausibility_score)s
+    )
+    ON DUPLICATE KEY UPDATE
+        gene_symbol = VALUES(gene_symbol),
+        gene_type = VALUES(gene_type),
+        expressed_brain = VALUES(expressed_brain),
+        brain_tissues = VALUES(brain_tissues),
+        expressed_neurons = VALUES(expressed_neurons),
+        expressed_glia = VALUES(expressed_glia),
+        cell_types = VALUES(cell_types),
+        go_neuro_processes = VALUES(go_neuro_processes),
+        go_toxic_response = VALUES(go_toxic_response),
+        ctd_chemicals = VALUES(ctd_chemicals),
+        ctd_neuro_diseases = VALUES(ctd_neuro_diseases),
+        neuro_plausibility_score = VALUES(neuro_plausibility_score),
+        last_updated = CURRENT_TIMESTAMP
+    """
+
+    cur.execute(sql, data)
+    cur.close()
+    conn.close()
+
+
+def get_gene_neuro_annotation(gene_id: str):
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+
+    sql = """
+    SELECT *
+    FROM gene_neuro_annotation
+    WHERE gene_id = %s
+    """
+
+    cur.execute(sql, (gene_id,))
+    result = cur.fetchone()
+
+    cur.close()
+    conn.close()
+    return result

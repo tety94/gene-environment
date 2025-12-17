@@ -1,6 +1,5 @@
 from db import get_conn, update_variant_gene, get_empty_variants_gene
-from ensembl_api import fetch_gene
-
+from apis.ensembl_api import EnsemblAPI
 
 def main():
     conn = get_conn()
@@ -8,7 +7,7 @@ def main():
 
     for _, variant in variants.iterrows():
         chrom, pos = variant['chromosome'], variant['position']
-        gene_id, gene_name = fetch_gene(chrom, pos)
+        gene_id, gene_name = EnsemblAPI.fetch_gene(chrom, pos)
         if gene_id:
             update_variant_gene(conn, variant['variant'], gene_id,gene_name)
             print(f"{variant['variant']} aggiornato con gene {gene_id}")

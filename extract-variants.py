@@ -3,6 +3,7 @@ import pandas as pd
 from cyvcf2 import VCF
 from intervaltree import Interval, IntervalTree
 import glob, os, sys, requests
+from apis.ensembl_api import EnsemblAPI
 
 if len(sys.argv) < 2:
     print("Uso: python estrai_varianti.py GENE1 [GENE2 ...]")
@@ -12,16 +13,11 @@ variants_input = sys.argv[1:]
 print("Geni richiesti:", variants_input)
 
 # ---- Recupera coordinate ENSEMBL ----
-def get_variant_coordinates(variant):
-    url = f"https://rest.ensembl.org/lookup/symbol/homo_sapiens/{variant}?content-type=application/json"
-    r = requests.get(url)
-    r.raise_for_status()
-    d = r.json()
-    return d["seq_region_name"], d["start"], d["end"]
+
 
 regions_by_chr = {}
 for variant in variants_input:
-    chr_num, s, e = get_variant_coordinates(variant)
+    chr_num, s, e = EnsemblAPI.get_variant_coordinates(variant)
     regions_by_chr.setdefault(chr_num, IntervalTree()).add(Interval(s, e+1, variant))
     print(f"{variant}: chr{chr_num}:{s}-{e}")
 
