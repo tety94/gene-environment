@@ -8,19 +8,21 @@ from apis.go_api import GOAPI
 
 class GeneAnnotator:
 
+
     @staticmethod
     def annotate(ensg: str):
         info = EnsemblAPI.get_gene_info(ensg)
 
+        gtex = GTExAPI.get_brain_expression(ensg)
         uniprots = EnsemblAPI.ensg_to_uniprot(ensg)
 
-        gtex = GTExAPI.get_brain_expression(ensg)
         hpa = HPAAPI.get_single_cell_info(ensg)
 
         go_terms = {"neuro": [], "toxic": []}
 
         for up in uniprots:
-            data = GOAPI.get_go_terms(up)
+            uniprot_full = f"UniProtKB:{up}"
+            data = GOAPI.get_go_terms(uniprot_full)
             go_terms["neuro"].extend(data.get("neuro", []))
             go_terms["toxic"].extend(data.get("toxic", []))
 
