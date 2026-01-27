@@ -7,10 +7,10 @@ from config import VFC_FOLDERS
 # -------------------------------
 input_vcf_folders = VFC_FOLDERS
 
-maf_threshold = 0.05       # MAF minima
+maf_threshold = 0.001       # MAF minima
 ld_window_size = 50        # numero SNP per finestra LD
 ld_step = 5                # passo della finestra
-ld_r2_threshold = 0.2      # soglia r^2 per LD pruning
+ld_r2_threshold = 0.8      # soglia r^2 per LD pruning
 output_subfolder = "vcf_filtered"  # sottocartella di output
 
 # -------------------------------

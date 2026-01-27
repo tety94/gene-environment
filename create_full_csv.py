@@ -14,6 +14,23 @@ csv_files = sorted([
     if not f.endswith("full_chr.csv")
 ])
 
+
+#check per evitare problemi
+def get_all_ids(fpath):
+    with open(fpath) as f:
+        next(f)  # salta header
+        return [line.split(",")[0] for line in f]
+
+ref_ids = get_all_ids(csv_files[0])
+
+for f in csv_files[1:]:
+    ids = get_all_ids(f)
+    if ids != ref_ids:
+        raise RuntimeError(f"❌ ID mismatch in {f}")
+
+
+
+
 print(f"🔹 Unione testuale di {len(csv_files)} file")
 
 # ---- HEADER ----

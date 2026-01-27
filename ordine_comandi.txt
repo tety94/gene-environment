@@ -1,0 +1,6 @@
+script per creare il file enorme su cui lanciare le analisi
+gene_reduction.py
+vcf_to_csv.py
+create_chr_csv.py
+create_full_csv.py
+
