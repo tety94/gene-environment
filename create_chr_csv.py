@@ -12,7 +12,7 @@ input_folders = VFC_FOLDERS        # Cartelle contenenti CSV dei genotipi dei ca
 output_folder = OUTPUT_FOLDER       # Cartella dove salvare i CSV uniti per cromosoma
 os.makedirs(output_folder, exist_ok=True)
 
-chromosomes = [str(i) for i in range(1, 23)]  # Cromosomi autosomici da processare
+chromosomes = [str(i) for i in range(1, 23)]  # Cromosomi da processare
 
 # -------------------------------
 # Funzione principale
@@ -60,8 +60,14 @@ def merge_chromosome(chr_num):
     # 1 o 2 → presenza di almeno un allele alternativo
     variant_cols = merged_df.columns
     arr = merged_df.values
+
+    #test 1
     arr[arr < 0] = 0   # valori mancanti diventano 0
     arr[arr > 0] = 1   # 1 o 2 diventano 1
+
+    #test 2
+    arr[arr < 0] = 0   # valori mancanti diventano 0 mentre 1 e 2 restano così
+
     merged_df[:] = arr.astype(np.int8)
 
     # ---------------- RIMOZIONE DUPLICATI ----------------
