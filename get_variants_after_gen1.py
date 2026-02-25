@@ -43,10 +43,9 @@ for folder in gen_folders:
         chr_name = os.path.basename(vcf_file).split(".")[0]
         print(f"  Processing {chr_name}")
 
-        # File temporaneo per VCF filtrato
         tmp_vcf = os.path.join(output_folder, f"{chr_name}_selected.vcf.gz")
 
-        # bcftools view per estrarre solo le varianti di interesse
+        # Estrazione solo varianti richieste
         subprocess.run([
             "bcftools", "view", "-R", regions_file,
             "-Oz", "-o", tmp_vcf, vcf_file
@@ -54,12 +53,12 @@ for folder in gen_folders:
         subprocess.run(["bcftools", "index", tmp_vcf], check=True)
 
         # ------------------ Controllo se ci sono varianti ------------------
-        result_count = subprocess.run(
+        check = subprocess.run(
             ["bcftools", "view", "-H", tmp_vcf],
             capture_output=True, text=True
         )
-        if not result_count.stdout.strip():
-            print(f"⚠️ Nessuna variante trovata in {vcf_file} per le varianti richieste, skip")
+        if not check.stdout.strip():
+            print(f"⚠️ Nessuna variante trovata in {vcf_file}, skip")
             continue  # Salta questo VCF
 
         # Leggi il VCF estratto in DataFrame
@@ -81,7 +80,7 @@ for folder in gen_folders:
         df_chr = df_chr.iloc[:, 1:]
         df_chr.columns = snp_ids
 
-        # Righe = campioni (puoi sostituire con sample ID reali se vuoi)
+        # Righe = campioni (qui generiamo sample_ID placeholder)
         df_chr.index = [f"sample_{i}" for i in range(df_chr.shape[0])]
 
         all_dfs.append(df_chr)
@@ -102,7 +101,7 @@ merged_df = merged_df.fillna(-1).astype(int)
 # Filtra SNP con troppi missing
 merged_df = merged_df.loc[:, (merged_df == -1).mean() < NULL_PRECENTAGE]
 
-# Binaria genotipi: 0 = no allele alt, 1 = almeno 1 allele alt
+# Binaria genotipi: 0 = assenza allele alt, 1 = presenza almeno 1 allele alt
 arr = merged_df.values
 arr[arr < 0] = 0
 arr[arr > 0] = 1
