@@ -26,9 +26,9 @@ def save_variant_result_not_calculated(conn, variant_original, muted, not_muted,
     reset_variant_in_progress(conn, variant_original, success=True)
 
 
-def process_single_variant(variant_col, variant_original, Ecols):
+def process_single_variant(variant_col, variant_original, Ecols, df):
 
-    df = pickle.load(open("temp_df.pkl", "rb"))
+    # df = pickle.load(open("temp_df.pkl", "rb"))
     conn = get_conn()
 
     # -----------------------------
@@ -40,26 +40,36 @@ def process_single_variant(variant_col, variant_original, Ecols):
         return None
 
     # Controlla se ci sono valori non numerici
-    # Trova righe che non sono numeri
-    non_numeric_mask = df[variant_col].apply(lambda x: not isinstance(x, (int, float, np.integer, np.floating)))
-
-    if non_numeric_mask.any():
-        print(f"[ERROR] Valori non numerici trovati in {variant_col}:")
-        print(df.loc[non_numeric_mask, variant_col])
+    # Trova righe che non sono numer
 
     # -----------------------------
     # CREA VARIABILE MATCHING BINARIA
     # -----------------------------
     # Filtra righe con valore "." nella colonna corrente
     # Funziona sia per 0/1 che per 0/1/2
-    df = df[df[variant_col] != '.'].copy()
+    # df = df[df[variant_col] != '.'].copy()
 
     # Converti solo quella colonna in int
+    # df[variant_col] = df[variant_col].astype(int)
+    # df["_match_variant"] = (df[variant_col] > 0).astype(int)
+
+    # n_treated = int((df["_match_variant"] == 1).sum())
+    # n_control = int((df["_match_variant"] == 0).sum())
+
+    df = df[df[variant_col] != '.'].copy()  # solo righe valide per questa variante
     df[variant_col] = df[variant_col].astype(int)
     df["_match_variant"] = (df[variant_col] > 0).astype(int)
 
+    # Poi usi df_variant invece di df
     n_treated = int((df["_match_variant"] == 1).sum())
     n_control = int((df["_match_variant"] == 0).sum())
+
+    non_numeric_mask = df[variant_col].apply(lambda x: not isinstance(x, (int, float, np.integer, np.floating)))
+
+    if non_numeric_mask.any():
+        print(f"[ERROR] Valori non numerici trovati in {variant_col}:")
+        print(df.loc[non_numeric_mask, variant_col])
+
 
     if n_treated < MIN_TREATED or n_control == 0:
         print(f"[INFO] Return 3: {variant_original} numero insufficiente")

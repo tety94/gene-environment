@@ -11,10 +11,10 @@ import random
 #todo: valutare split in discovery replication ed eventualmente valutare solo il beta concorde
 #todo: selezionare le varienti in base al linkage disequilibrium
 
-def run_parallel_processing(variants, mapping, Ecols, description=""):
+def run_parallel_processing(variants, mapping, Ecols, description="", df=None):
     print(f"[INFO] Avvio processi paralleli: {description} ({len(variants)} varianti)")
     with ProcessPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        futures = [ex.submit(process_single_variant, g, mapping[g], Ecols) for g in variants]
+        futures = [ex.submit(process_single_variant, g, mapping[g], Ecols, df) for g in variants]
         for f in as_completed(futures):
             try:
                 f.result()
@@ -26,7 +26,7 @@ def main():
     print(f"[START] Analisi iniziata alle: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     df, variant_cols_safe, mapping, Ecols, variant_cols = load_and_prepare_data()
-    df.to_pickle("temp_df.pkl")
+    # df.to_pickle("temp_df.pkl")
 
     # Prepara la lista di dizionari da inserire nel DB
     variants_to_insert = []
@@ -48,7 +48,7 @@ def main():
 
     variants_to_run = get_variants_to_run(mapping, variant_cols_safe)
     random.shuffle(variants_to_run)
-    run_parallel_processing(variants_to_run, mapping, Ecols, description="primo run con permutazioni standard")
+    run_parallel_processing(variants_to_run, mapping, Ecols, description="primo run con permutazioni standard", df=df)
 
     # ---------- CARICA RISULTATI E PLOT ----------
     # ricarica risultati finali
