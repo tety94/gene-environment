@@ -38,12 +38,22 @@ for input_folder in input_vcf_folders:
             "--out", plink_prefix
         ], check=True)
 
+        fam_file = plink_prefix + ".fam"
+        remove_file = plink_prefix + "_remove.txt"
+
+        with open(fam_file) as f, open(remove_file, "w") as out:
+            for line in f:
+                fid, iid = line.strip().split()[:2]  # Prendi Family ID e Individual ID
+                if iid.startswith("ACH"):
+                    out.write(f"{fid} {iid}\n")
+
         # 2️⃣ Filtraggio SNP per frequenza dell'allele minore (MAF)
         # Rimuove SNP troppo rari (MAF < 0.001), che possono introdurre rumore statistico
         plink_maf_prefix = os.path.join(output_vcf_folder, base_name + "_maf")
         subprocess.run([
             "plink2",
             "--bfile", plink_prefix,
+            "--remove", remove_file,
             "--maf", str(maf_threshold),
             "--make-bed",
             "--out", plink_maf_prefix
