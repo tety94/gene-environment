@@ -16,7 +16,7 @@ os.makedirs(output_folder, exist_ok=True)
 variants_csv = "/srv/python-projects/gene-environment/variant_results_significant.csv"
 variants_df = pd.read_csv(variants_csv, sep=";")
 
-# Costruisci lista di varianti in formato CHR_POS_REF_ALT
+# Costruisci lista di varianti CHR_POS_REF_ALT
 variants_of_interest = []
 for _, row in variants_df.iterrows():
     chrom = str(row["chromosome"])
@@ -45,30 +45,43 @@ for folder in gen_folders:
     subprocess.run(["bcftools", "index", concat_vcf], check=True)
 
     # -------------------------------
-    # Legge tutto il VCF in pandas
+    # Ciclo variante per variante
     # -------------------------------
-    cmd_query = ["bcftools", "query", "-f", "%CHROM_%POS_%REF_%ALT[\t%GT]\n", concat_vcf]
-    result = subprocess.run(cmd_query, capture_output=True, text=True, check=True)
+    dfs = []
+    for var in variants_of_interest:
+        chrom, pos, ref, alt = var.split("_")
+        try:
+            cmd = [
+                "bcftools",
+                "query",
+                "-f", f"{var}[\t%GT]\n",
+                "-r", f"{chrom}:{pos}-{pos}",
+                concat_vcf
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            if not result.stdout.strip():
+                continue  # variante non trovata
+            df_var = pd.read_csv(StringIO(result.stdout), sep="\t", header=None)
+            df_var.columns = [var]
+            dfs.append(df_var)
+        except subprocess.CalledProcessError:
+            # Se bcftools fallisce (variante non trovata), ignoriamo
+            continue
 
-    if not result.stdout.strip():
-        print(f"⚠️ Nessuna variante trovata in {generation_name}")
+    if not dfs:
+        print(f"⚠️ Nessuna variante trovata per {generation_name}")
         continue
 
-    df = pd.read_csv(StringIO(result.stdout), sep="\t", header=None)
-    snp_ids = df.iloc[:, 0]
-    df = df.iloc[:, 1:]
-    df.columns = snp_ids
-    df.index = [f"{generation_name}_sample_{i}" for i in range(df.shape[0])]
+    # Concatenazione delle colonne (varianti) → campioni come righe
+    df_gen = pd.concat(dfs, axis=1)
+    df_gen.index = [f"{generation_name}_sample_{i}" for i in range(df_gen.shape[0])]
 
-    # Filtra solo varianti di interesse presenti nel VCF
-    df = df.loc[:, df.columns.intersection(variants_of_interest)]
-
-    # Binarizza genotipi: 0 = assenza allele alternativo, 1 = presenza almeno 1 allele
-    df = df.fillna(0).astype(int)
-    df[df > 0] = 1
+    # Binarizzazione: 0 = assenza allele alternativo, 1 = presenza almeno 1 allele
+    df_gen = df_gen.fillna(0).astype(int)
+    df_gen[df_gen > 0] = 1
 
     # Salva CSV generazione-specifico
     gen_csv = os.path.join(output_folder, f"{generation_name}_variants.csv")
-    df.to_csv(gen_csv)
+    df_gen.to_csv(gen_csv)
     gen_csv_paths.append(gen_csv)
     print(f"✅ CSV salvato per {generation_name}: {gen_csv}")
