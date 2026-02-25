@@ -40,12 +40,12 @@ def process_single_variant(variant_col, variant_original, Ecols):
         return None
 
     # Controlla se ci sono valori non numerici
-    non_numeric = df[variant_col].apply(lambda x: not isinstance(x, (int, float)))
-    if non_numeric.any():
-        print(f"[ERROR] Valori non numerici in {variant_col}:")
-        print(df.loc[non_numeric, variant_col].head(10))
-        # Facoltativo: converti tutto in numerico con coercizione
-        df[variant_col] = pd.to_numeric(df[variant_col], errors='coerce')
+    # Trova righe che non sono numeri
+    non_numeric_mask = df[variant_col].apply(lambda x: not isinstance(x, (int, float, np.integer, np.floating)))
+
+    if non_numeric_mask.any():
+        print(f"[ERROR] Valori non numerici trovati in {variant_col}:")
+        print(df.loc[non_numeric_mask, variant_col])
 
     # -----------------------------
     # CREA VARIABILE MATCHING BINARIA
