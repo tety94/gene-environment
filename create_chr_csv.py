@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import numpy as np
 from glob import glob
-from config import VFC_FOLDERS, NULL_PRECENTAGE, OUTPUT_FOLDER
+from config import VFC_FOLDERS, NULL_PRECENTAGE, OUTPUT_FOLDER, MAX_WORKERS
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # -------------------------------
@@ -82,7 +82,7 @@ def merge_chromosome(chr_num):
 # -------------------------------
 # Parallelizzazione per cromosoma
 # -------------------------------
-with ProcessPoolExecutor(max_workers=16) as executor:
+with ProcessPoolExecutor(max_workers=MAX_WORKERS) as executor:
     # Submit delle funzioni in parallelo per ogni cromosoma
     futures = [executor.submit(merge_chromosome, chr_num) for chr_num in chromosomes]
     for future in as_completed(futures):
