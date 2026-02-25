@@ -13,7 +13,7 @@ gen_folders = [
 output_folder = "/mnt/cresla_prod/genome_datasets/merged_csv/"
 os.makedirs(output_folder, exist_ok=True)
 
-variants_csv = "/mnt/cresla_prod/genome_datasets/variant_results_significant.csv"
+variants_csv = "/srv/python-projects/gene-environment/variant_results_significant.csv"
 variants_df = pd.read_csv(variants_csv, sep=";")
 
 # Costruisci lista di varianti in formato CHR:POS-REF-ALT
