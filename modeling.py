@@ -1,6 +1,7 @@
 import statsmodels.formula.api as smf
 import numpy as np
 import pickle
+import pandas as pd
 from tqdm import tqdm
 from config import TARGET_COL, MATCH_K, MIN_TREATED, MIN_SAMPLE_SIZE, N_PERM, RANDOM_STATE, MIN_OBS_COEF, N_PERM_HIGH, PVALUE_THRESHOLD
 from db import save_variant_result, variant_already_done, get_conn, mark_variant_in_progress, reset_variant_in_progress
@@ -37,6 +38,14 @@ def process_single_variant(variant_col, variant_original, Ecols):
         print(f"[INFO] Return: {variant_original} già in progress da un altro processo")
         conn.close()
         return None
+
+    # Controlla se ci sono valori non numerici
+    non_numeric = df[variant_col].apply(lambda x: not isinstance(x, (int, float)))
+    if non_numeric.any():
+        print(f"[ERROR] Valori non numerici in {variant_col}:")
+        print(df.loc[non_numeric, variant_col].head(10))
+        # Facoltativo: converti tutto in numerico con coercizione
+        df[variant_col] = pd.to_numeric(df[variant_col], errors='coerce')
 
     # -----------------------------
     # CREA VARIABILE MATCHING BINARIA
