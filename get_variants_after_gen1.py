@@ -1,6 +1,7 @@
 import os
 import subprocess
 import pandas as pd
+import numpy as np
 from io import StringIO
 
 # -------------------------------
@@ -10,78 +11,84 @@ gen_folders = [
     "/mnt/cresla_prod/genome_datasets/gen2/",
     "/mnt/cresla_prod/genome_datasets/gen3/"
 ]
+
 output_folder = "/mnt/cresla_prod/genome_datasets/merged_csv/"
 os.makedirs(output_folder, exist_ok=True)
+NULL_PRECENTAGE = 0.1
 
-variants_csv = "/srv/python-projects/gene-environment/variant_results_significant.csv"
-variants_df = pd.read_csv(variants_csv, sep=";")
-
-# Costruisci lista di varianti CHR_POS_REF_ALT
-variants_of_interest = []
-for _, row in variants_df.iterrows():
-    chrom = str(row["chromosome"])
-    pos = str(row["position"])
-    ref, alt = row["mutation"].split("_")
-    variants_of_interest.append(f"{chrom}_{pos}_{ref}_{alt}")
+# CSV con le varianti da prendere (una variante per riga, formato CHR_POS_REF_ALT)
+variants_file = "/srv/python-projects/gene-environment/variants_to_extract.csv"
+variants = pd.read_csv(variants_file, header=None)[0].tolist()
 
 # -------------------------------
-# STEP 1: Estrai varianti per generazione
+# FUNZIONE PER ESTRARRE VARIANTI
 # -------------------------------
-gen_csv_paths = []
+def extract_variants_for_generation(gen_folder, generation_name):
+    print(f"\n🔹 Processing generation: {generation_name}")
+    concat_vcfs = []
 
-for folder in gen_folders:
-    generation_name = os.path.basename(os.path.normpath(folder))
-    print(f"🔹 Processing generation: {generation_name}")
+    # Trova tutti i VCF selezionati per cromosoma
+    for f in os.listdir(gen_folder):
+        if f.endswith("_selected.vcf.gz"):
+            concat_vcfs.append(os.path.join(gen_folder, f))
 
-    # Lista VCF per cromosoma
-    vcf_files = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith("_selected.vcf.gz")]
-    if not vcf_files:
-        print(f"⚠️ Nessun VCF trovato in {folder}, salto generazione")
-        continue
-
-    # Concatena tutti i VCF cromosoma
-    concat_vcf = os.path.join(output_folder, f"{generation_name}_concat.vcf.gz")
-    subprocess.run(["bcftools", "concat", "-Oz", "-o", concat_vcf] + vcf_files, check=True)
-    subprocess.run(["bcftools", "index", concat_vcf], check=True)
-
-    # -------------------------------
-    # Ciclo variante per variante
-    # -------------------------------
     dfs = []
-    for var in variants_of_interest:
+
+    for var in variants:
         chrom, pos, ref, alt = var.split("_")
-        try:
-            cmd = [
-                "bcftools",
-                "query",
-                "-f", f"{var}[\t%GT]\n",
-                "-r", f"{chrom}:{pos}-{pos}",
-                concat_vcf
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            if not result.stdout.strip():
-                continue  # variante non trovata
-            df_var = pd.read_csv(StringIO(result.stdout), sep="\t", header=None)
-            df_var.columns = [var]
-            dfs.append(df_var)
-        except subprocess.CalledProcessError:
-            # Se bcftools fallisce (variante non trovata), ignoriamo
-            continue
+        pos = int(pos)
+
+        for vcf in concat_vcfs:
+            try:
+                cmd = [
+                    "bcftools",
+                    "query",
+                    "-f", f"{var}[\t%GT]\n",
+                    "-r", f"{chrom}:{pos}-{pos}",
+                    vcf
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                if not result.stdout.strip():
+                    continue  # variante non trovata in questo VCF
+                df_var = pd.read_csv(StringIO(result.stdout), sep="\t", header=None)
+                df_var = df_var.T               # righe = campioni, colonna = SNP
+                df_var.columns = [var]
+                dfs.append(df_var)
+            except subprocess.CalledProcessError:
+                continue
 
     if not dfs:
         print(f"⚠️ Nessuna variante trovata per {generation_name}")
-        continue
+        return None
 
-    # Concatenazione delle colonne (varianti) → campioni come righe
-    df_gen = pd.concat(dfs, axis=1)
-    df_gen.index = [f"{generation_name}_sample_{i}" for i in range(df_gen.shape[0])]
+    merged_df = pd.concat(dfs, axis=1, sort=False)
+    merged_df = merged_df.fillna(-1).astype(int)
 
-    # Binarizzazione: 0 = assenza allele alternativo, 1 = presenza almeno 1 allele
-    df_gen = df_gen.fillna(0).astype(int)
-    df_gen[df_gen > 0] = 1
+    # Filtra SNP con troppi missing
+    merged_df = merged_df.loc[:, (merged_df == -1).mean() < NULL_PRECENTAGE]
 
-    # Salva CSV generazione-specifico
-    gen_csv = os.path.join(output_folder, f"{generation_name}_variants.csv")
-    df_gen.to_csv(gen_csv)
-    gen_csv_paths.append(gen_csv)
-    print(f"✅ CSV salvato per {generation_name}: {gen_csv}")
+    # Binarizza genotipi: 0 = assenza allele alternativo, 1 = presenza almeno 1 allele alternativo
+    arr = merged_df.values
+    arr[arr < 0] = 0
+    arr[arr > 0] = 1
+    merged_df[:] = arr.astype(np.int8)
+
+    # Rimuove duplicati (campioni)
+    merged_df = merged_df[~merged_df.index.duplicated(keep='first')]
+
+    output_csv = os.path.join(output_folder, f"{generation_name}_variants.csv")
+    merged_df.to_csv(output_csv)
+    print(f"✅ CSV per {generation_name} salvato in: {output_csv}")
+    return output_csv
+
+# -------------------------------
+# ESECUZIONE PER LE GENERAZIONI
+# -------------------------------
+csv_files = []
+for folder in gen_folders:
+    generation_name = os.path.basename(os.path.normpath(folder))
+    csv_file = extract_variants_for_generation(folder, generation_name)
+    if csv_file:
+        csv_files.append(csv_file)
+
+print("\n📄 Tutti i CSV generati. Ora puoi unirli con pandas se vuoi.")
