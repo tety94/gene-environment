@@ -2,7 +2,6 @@ import os
 import pandas as pd
 import numpy as np
 import subprocess
-from glob import glob
 
 # -------------------------------
 # CONFIGURAZIONE
@@ -54,6 +53,15 @@ for folder in gen_folders:
         ], check=True)
         subprocess.run(["bcftools", "index", tmp_vcf], check=True)
 
+        # ------------------ Controllo se ci sono varianti ------------------
+        result_count = subprocess.run(
+            ["bcftools", "view", "-H", tmp_vcf],
+            capture_output=True, text=True
+        )
+        if not result_count.stdout.strip():
+            print(f"⚠️ Nessuna variante trovata in {vcf_file} per le varianti richieste, skip")
+            continue  # Salta questo VCF
+
         # Leggi il VCF estratto in DataFrame
         cmd = [
             "bcftools", "query",
@@ -81,6 +89,9 @@ for folder in gen_folders:
 # -------------------------------
 # STEP 3: Merge cromosomi e generazioni
 # -------------------------------
+if not all_dfs:
+    raise ValueError("❌ Nessuna variante trovata in tutti i VCF filtrati!")
+
 merged_df = pd.concat(all_dfs, axis=1, join="outer")
 
 # -------------------------------
