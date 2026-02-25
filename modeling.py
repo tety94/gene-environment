@@ -51,11 +51,11 @@ def process_single_variant(variant_col, variant_original, Ecols):
     # CREA VARIABILE MATCHING BINARIA
     # -----------------------------
     # Filtra righe con valore "." nella colonna corrente
+    # Funziona sia per 0/1 che per 0/1/2
     df = df[df[variant_col] != '.'].copy()
 
     # Converti solo quella colonna in int
     df[variant_col] = df[variant_col].astype(int)
-    # Funziona sia per 0/1 che per 0/1/2
     df["_match_variant"] = (df[variant_col] > 0).astype(int)
 
     n_treated = int((df["_match_variant"] == 1).sum())
