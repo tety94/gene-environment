@@ -16,17 +16,19 @@ os.makedirs(output_folder, exist_ok=True)
 variants_csv = "/srv/python-projects/gene-environment/variant_results_significant.csv"
 variants_df = pd.read_csv(variants_csv, sep=";")
 
-# Costruisci lista di varianti in formato CHR:POS-REF-ALT
+# Costruisci lista di varianti in formato CHR_POS_REF_ALT
 variants_of_interest = []
 for _, row in variants_df.iterrows():
     chrom = str(row["chromosome"])
     pos = str(row["position"])
     ref, alt = row["mutation"].split("_")
-    variants_of_interest.append(f"{chrom}:{pos}-{ref}-{alt}")
+    variants_of_interest.append(f"{chrom}_{pos}_{ref}_{alt}")
 
 # -------------------------------
 # STEP 1: Estrai varianti per generazione
 # -------------------------------
+gen_csv_paths = []
+
 for folder in gen_folders:
     generation_name = os.path.basename(os.path.normpath(folder))
     print(f"🔹 Processing generation: {generation_name}")
@@ -43,35 +45,23 @@ for folder in gen_folders:
     subprocess.run(["bcftools", "index", concat_vcf], check=True)
 
     # -------------------------------
-    # Legge tutte le varianti presenti nel VCF
+    # Legge tutto il VCF in pandas
     # -------------------------------
-    cmd_sites = ["bcftools", "query", "-f", "%CHROM:%POS-%REF-%ALT\n", concat_vcf]
-    result_sites = subprocess.run(cmd_sites, capture_output=True, text=True, check=True)
-    vcf_sites = set(result_sites.stdout.strip().split("\n"))
+    cmd_query = ["bcftools", "query", "-f", "%CHROM_%POS_%REF_%ALT[\t%GT]\n", concat_vcf]
+    result = subprocess.run(cmd_query, capture_output=True, text=True, check=True)
 
-    # Intersezione con varianti di interesse (ignora quelle non presenti)
-    selected_sites = [v for v in variants_of_interest if v in vcf_sites]
-    if not selected_sites:
-        print(f"⚠️ Nessuna variante di interesse trovata in {generation_name}")
+    if not result.stdout.strip():
+        print(f"⚠️ Nessuna variante trovata in {generation_name}")
         continue
 
-    # File temporaneo con varianti presenti
-    variants_file = os.path.join(output_folder, f"{generation_name}_variants_present.txt")
-    with open(variants_file, "w") as f:
-        for v in selected_sites:
-            f.write(v + "\n")
-
-    # -------------------------------
-    # Estrazione genotipi e creazione CSV
-    # -------------------------------
-    cmd_query = ["bcftools", "query", "-f", "%CHROM_%POS_%REF_%ALT[\t%GT]\n", "-R", variants_file, concat_vcf]
-    result_query = subprocess.run(cmd_query, capture_output=True, text=True, check=True)
-
-    df = pd.read_csv(StringIO(result_query.stdout), sep="\t", header=None)
+    df = pd.read_csv(StringIO(result.stdout), sep="\t", header=None)
     snp_ids = df.iloc[:, 0]
     df = df.iloc[:, 1:]
     df.columns = snp_ids
     df.index = [f"{generation_name}_sample_{i}" for i in range(df.shape[0])]
+
+    # Filtra solo varianti di interesse presenti nel VCF
+    df = df.loc[:, df.columns.intersection(variants_of_interest)]
 
     # Binarizza genotipi: 0 = assenza allele alternativo, 1 = presenza almeno 1 allele
     df = df.fillna(0).astype(int)
@@ -80,4 +70,5 @@ for folder in gen_folders:
     # Salva CSV generazione-specifico
     gen_csv = os.path.join(output_folder, f"{generation_name}_variants.csv")
     df.to_csv(gen_csv)
+    gen_csv_paths.append(gen_csv)
     print(f"✅ CSV salvato per {generation_name}: {gen_csv}")
