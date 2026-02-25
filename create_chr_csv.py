@@ -62,11 +62,11 @@ def merge_chromosome(chr_num):
     arr = merged_df.values
 
     #test 1
-    # arr[arr < 0] = 0   # valori mancanti diventano 0
-    # arr[arr > 0] = 1   # 1 o 2 diventano 1
+    arr[arr < 0] = 0   # valori mancanti diventano 0
+    arr[arr > 0] = 1   # 1 o 2 diventano 1
 
     #test 2
-    arr[arr < 0] = 0   # valori mancanti diventano 0 mentre 1 e 2 restano così
+    # arr[arr < 0] = 0   # valori mancanti diventano 0 mentre 1 e 2 restano così
 
     merged_df[:] = arr.astype(np.int8)
 
