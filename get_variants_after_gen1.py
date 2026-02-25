@@ -1,8 +1,8 @@
 import os
 import pandas as pd
 import numpy as np
-from glob import glob
 import subprocess
+from glob import glob
 
 # -------------------------------
 # CONFIGURAZIONE
@@ -12,7 +12,7 @@ gen_folders = [
     "/mnt/cresla_prod/genome_datasets/gen3/"
 ]
 
-variants_csv = "variants_from_db.csv"  # esportato dal DB
+variants_csv = "variants_from_db.csv"  # CSV con varianti significative dal DB
 output_folder = "/mnt/cresla_prod/genome_datasets/merged_csv/"
 NULL_PRECENTAGE = 0.1
 os.makedirs(output_folder, exist_ok=True)
@@ -30,7 +30,7 @@ with open(regions_file, "w") as f:
         f.write(f"{row['chromosome']}\t{row['position']}\t{row['position']}\n")
 
 # -------------------------------
-# STEP 2: Estrazione varianti per VCF
+# STEP 2: Estrazione varianti dai VCF
 # -------------------------------
 all_dfs = []
 
@@ -42,6 +42,9 @@ for folder in gen_folders:
 
     for vcf_file in vcf_files:
         chr_name = os.path.basename(vcf_file).split(".")[0]
+        print(f"  Processing {chr_name}")
+
+        # File temporaneo per VCF filtrato
         tmp_vcf = os.path.join(output_folder, f"{chr_name}_selected.vcf.gz")
 
         # bcftools view per estrarre solo le varianti di interesse
@@ -51,19 +54,27 @@ for folder in gen_folders:
         ], check=True)
         subprocess.run(["bcftools", "index", tmp_vcf], check=True)
 
-        # Leggi VCF estratto in DataFrame
-        # Righe = campioni, colonne = SNP
+        # Leggi il VCF estratto in DataFrame
+        cmd = [
+            "bcftools", "query",
+            "-f", "%CHROM_%POS_%REF_%ALT[\t%GT]\n",
+            tmp_vcf
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+
         df_chr = pd.read_csv(
-            f"<(bcftools query -f '%CHROM_%POS_%REF_%ALT[\t%GT]\n' {tmp_vcf})",
+            pd.compat.StringIO(result.stdout),
             sep="\t",
-            header=None,
-            engine="python"
+            header=None
         )
 
+        # Prima colonna = SNP ID
         snp_ids = df_chr.iloc[:, 0]
         df_chr = df_chr.iloc[:, 1:]
         df_chr.columns = snp_ids
-        df_chr.index = [f"{i}" for i in range(df_chr.shape[0])]  # se vuoi puoi usare i sample ID reali
+
+        # Righe = campioni (puoi sostituire con sample ID reali se vuoi)
+        df_chr.index = [f"sample_{i}" for i in range(df_chr.shape[0])]
 
         all_dfs.append(df_chr)
 
@@ -87,7 +98,12 @@ arr[arr > 0] = 1
 merged_df[:] = arr.astype(np.int8)
 
 # -------------------------------
-# STEP 5: Salvataggio CSV
+# STEP 5: Rimozione duplicati (campioni ripetuti)
+# -------------------------------
+merged_df = merged_df[~merged_df.index.duplicated(keep='first')]
+
+# -------------------------------
+# STEP 6: Salvataggio CSV finale
 # -------------------------------
 output_csv = os.path.join(output_folder, "significant_variants_merged.csv")
 merged_df.to_csv(output_csv)
