@@ -43,20 +43,20 @@ for folder in gen_folders:
     subprocess.run(["bcftools", "index", concat_vcf], check=True)
 
     # -------------------------------
-    # Estrazione solo delle varianti che esistono
+    # Legge tutte le varianti presenti nel VCF
     # -------------------------------
     cmd_sites = ["bcftools", "query", "-f", "%CHROM:%POS-%REF-%ALT\n", concat_vcf]
     result_sites = subprocess.run(cmd_sites, capture_output=True, text=True, check=True)
     vcf_sites = set(result_sites.stdout.strip().split("\n"))
 
-    # Intersezione con varianti di interesse presenti nel VCF
+    # Intersezione con varianti di interesse (ignora quelle non presenti)
     selected_sites = [v for v in variants_of_interest if v in vcf_sites]
     if not selected_sites:
         print(f"⚠️ Nessuna variante di interesse trovata in {generation_name}")
         continue
 
-    # File temporaneo con le varianti presenti
-    variants_file = os.path.join(output_folder, f"{generation_name}_variants.txt")
+    # File temporaneo con varianti presenti
+    variants_file = os.path.join(output_folder, f"{generation_name}_variants_present.txt")
     with open(variants_file, "w") as f:
         for v in selected_sites:
             f.write(v + "\n")
