@@ -111,11 +111,11 @@ def process_single_variant(variant_col, variant_original, Ecols, df):
     max_smd = max(smd_results.values()) if smd_results else 1
 
     # if max_smd > 0.25:
-    # if max_smd > 0.5:
-    #     print(f"[WARN] Matching fallito per {variant_original} (Max SMD = {max_smd:.3f})")
-    #     save_variant_result_not_calculated(conn, variant_original, n_treated, n_control, max_smd)
-    #     conn.close()
-    #     return variant_original
+    if max_smd > 0.5:
+        print(f"[WARN] Matching fallito per {variant_original} (Max SMD = {max_smd:.3f})")
+        save_variant_result_not_calculated(conn, variant_original, n_treated, n_control, max_smd)
+        conn.close()
+        return variant_original
 
     # -----------------------------
     # MODELLO OLS (VARIANTE ORIGINALE)
