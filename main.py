@@ -48,7 +48,8 @@ def main():
 
     variants_to_run = get_variants_to_run(mapping, variant_cols_safe)
     random.shuffle(variants_to_run)
-    run_parallel_processing(variants_to_run, mapping, Ecols, description="primo run con permutazioni standard", df=df)
+    # run_parallel_processing(variants_to_run, mapping, Ecols, description="primo run con permutazioni standard", df=df)
+    run_parallel_processing(variants_to_run, mapping, Ecols, description="primo run con permutazioni standard")
 
     # ---------- CARICA RISULTATI E PLOT ----------
     # ricarica risultati finali
