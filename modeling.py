@@ -7,6 +7,8 @@ from config import TARGET_COL, MATCH_K, MIN_TREATED, MIN_SAMPLE_SIZE, N_PERM, RA
 from db import save_variant_result, variant_already_done, get_conn, mark_variant_in_progress, reset_variant_in_progress
 from matching import match_control_units, check_balance
 
+global_df = None
+
 def build_formula(onset_col, variant_col, exposures, covariates, df_subset):
     exposures_str = " + ".join(exposures)
     formula = f"{onset_col} ~ {variant_col} * ({exposures_str})"
