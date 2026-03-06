@@ -29,7 +29,7 @@ def save_variant_result_not_calculated(conn, variant_original, muted, not_muted,
 def process_single_variant(variant_col, variant_original, Ecols, df):
 
     # df = pickle.load(open("/mnt/hereditary_dev/pkl/temp_df.pkl", "rb"))
-    df = pickle.load(open("/tmp/temp_df.pkl", "rb"))
+    df = pickle.load(open("/temp_df.pkl", "rb"))
     conn = get_conn()
 
     # -----------------------------
