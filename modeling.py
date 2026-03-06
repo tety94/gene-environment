@@ -26,10 +26,13 @@ def save_variant_result_not_calculated(conn, variant_original, muted, not_muted,
     reset_variant_in_progress(conn, variant_original, success=True)
 
 
-def process_single_variant(variant_col, variant_original, Ecols, df):
+def process_single_variant(variant_col, variant_original, Ecols):
+# def process_single_variant(variant_col, variant_original, Ecols, df):
 
     # df = pickle.load(open("/mnt/hereditary_dev/pkl/temp_df.pkl", "rb"))
-    df = pickle.load(open("temp_df.pkl", "rb"))
+    # df = pickle.load(open("temp_df.pkl", "rb"))
+    global global_df
+    df = global_df
     conn = get_conn()
 
     # -----------------------------

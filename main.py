@@ -7,14 +7,22 @@ from config import MAX_WORKERS
 from db import load_variant_results, insert_new_variants, get_variants_to_run
 import config
 import random
+import pickle
+
+global_df = None
+
+def init_worker():
+    global global_df
+    global_df = pickle.load(open("temp_df.pkl", "rb"))
 
 #todo: valutare split in discovery replication ed eventualmente valutare solo il beta concorde
 #todo: selezionare le varienti in base al linkage disequilibrium
 
 def run_parallel_processing(variants, mapping, Ecols, description="", df=None):
     print(f"[INFO] Avvio processi paralleli: {description} ({len(variants)} varianti)")
-    with ProcessPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        futures = [ex.submit(process_single_variant, g, mapping[g], Ecols, df) for g in variants]
+    with ProcessPoolExecutor(max_workers=MAX_WORKERS,initializer=init_worker) as ex:
+        # futures = [ex.submit(process_single_variant, g, mapping[g], Ecols, df) for g in variants]
+        futures = [ex.submit(process_single_variant, g, mapping[g], Ecols) for g in variants]
         for f in as_completed(futures):
             try:
                 f.result()
