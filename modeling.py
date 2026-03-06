@@ -53,7 +53,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
             "obs_coef": obs_coef,
             "perm_mean": None,
             "perm_std": None,
-            "p_emp": None,
+            "p_emp": 1,
             "max_smd": max_smd,
             "iterations": iterations,
             "empirical_p_significant": False
