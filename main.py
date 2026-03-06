@@ -12,11 +12,16 @@ import os
 
 global_df = None
 
+
 def init_worker():
     import modeling
+    import db
+
     with open("temp_df.pkl", "rb") as f:
         modeling.global_df = pickle.load(f)
-    print(f"[INFO] Worker {os.getpid()} caricato global_df")
+
+    modeling.worker_conn = db.get_conn()
+    print(f"[INFO] Worker {os.getpid()} caricato global_df e connessione DB")
 
 
 #todo: valutare split in discovery replication ed eventualmente valutare solo il beta concorde

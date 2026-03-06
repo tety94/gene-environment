@@ -8,6 +8,7 @@ from db import save_variant_result, variant_already_done, get_conn, mark_variant
 from matching import match_control_units, check_balance
 
 global_df = None
+worker_conn = None
 
 def build_formula(onset_col, variant_col, exposures, covariates, df_subset):
     exposures_str = " + ".join(exposures)
@@ -35,7 +36,9 @@ def process_single_variant(variant_col, variant_original, Ecols):
     # df = pickle.load(open("temp_df.pkl", "rb"))
     global global_df
     df = global_df
-    conn = get_conn()
+
+    import modeling
+    conn = modeling.worker_conn
 
     # -----------------------------
     # SEGNA IN PROGRESS
