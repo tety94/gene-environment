@@ -97,10 +97,9 @@ def process_single_variant(variant_col, variant_original, Ecols):
             "obs_coef": obs_coef,
             "perm_mean": None,
             "perm_std": None,
-            "p_emp": None,
+            "p_emp": 1,
             "max_smd": max_smd,
             "iterations": N_PERM,
-            "empirical_p_significant": False
         }
 
     rng = np.random.RandomState(RANDOM_STATE + (abs(hash(variant_col)) % 2_000_000))
@@ -143,7 +142,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
 
         perm_betas_final = np.concatenate([perm_betas_light, perm_betas_additional])
         perm_betas_final = np.array([x for x in perm_betas_final if not np.isnan(x)])
-        p_emp_final = float(np.mean(np.abs(perm_betas_final) >= np.abs(obs_coef))) if perm_betas_final.size > 0 else None
+        p_emp_final = float(np.mean(np.abs(perm_betas_final) >= np.abs(obs_coef))) if perm_betas_final.size > 0 else 1
         iterations_final = N_PERM_HIGH
     else:
         perm_betas_final = perm_betas_light
