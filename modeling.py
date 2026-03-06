@@ -29,12 +29,13 @@ def save_variant_result_not_calculated(conn, variant_original, muted, not_muted,
     reset_variant_in_progress(conn, variant_original, success=True)
 
 
+
+
 def process_single_variant(variant_col, variant_original, Ecols):
     df = global_df
-    conn = worker_conn
-
-    if not mark_variant_in_progress(conn, variant_original):
-        return None
+    # RIMOSSO: conn = worker_conn
+    # RIMOSSO: mark_variant_in_progress / reset_variant_in_progress
+    # Il worker fa solo calcoli — il DB lo gestisce il main process
 
     df = df[df[variant_col] != '.'].copy()
     df[variant_col] = df[variant_col].astype(int)
@@ -43,63 +44,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
     n_treated = int((df["_match_variant"] == 1).sum())
     n_control = int((df["_match_variant"] == 0).sum())
 
-    if n_treated < MIN_TREATED or n_control == 0:
-        reset_variant_in_progress(conn, variant_original, success=True)
-        return {
-            "variant": variant_original,
-            "n_treated": n_treated,
-            "n_control": n_control,
-            "obs_coef": None,
-            "perm_mean": None,
-            "perm_std": None,
-            "p_emp": None,
-            "max_smd": None
-        }
-
-    cols = [TARGET_COL, variant_col, "_match_variant"] + Ecols
-    df_model = df[cols].dropna()
-    if df_model.shape[0] < MIN_SAMPLE_SIZE:
-        reset_variant_in_progress(conn, variant_original, success=True)
-        return {
-            "variant": variant_original,
-            "n_treated": n_treated,
-            "n_control": n_control,
-            "obs_coef": None,
-            "perm_mean": None,
-            "perm_std": None,
-            "p_emp": None,
-            "max_smd": None
-        }
-
-    # Matching (funzioni esistenti)
-    matched_obs = match_control_units(df_model, "_match_variant", k=MATCH_K, covariates_for_matching=Ecols)
-    if matched_obs is None or matched_obs.shape[0] < MIN_SAMPLE_SIZE:
-        reset_variant_in_progress(conn, variant_original, success=True)
-        return {
-            "variant": variant_original,
-            "n_treated": n_treated,
-            "n_control": n_control,
-            "obs_coef": None,
-            "perm_mean": None,
-            "perm_std": None,
-            "p_emp": None,
-            "max_smd": None
-        }
-
-    smd_results = check_balance(matched_obs, "_match_variant", Ecols)
-    max_smd = max(smd_results.values()) if smd_results else 1
-
-    formula = build_formula(TARGET_COL, variant_col, Ecols, [], matched_obs)
-    mod = smf.ols(formula=formula, data=matched_obs).fit()
-    interaction_name = _find_interaction_term(mod.params.index, variant_col)
-
-    if interaction_name is None:
-        reset_variant_in_progress(conn, variant_original, success=True)
-        return None
-
-    obs_coef = float(mod.params[interaction_name])
-    if obs_coef is None or abs(obs_coef) < MIN_OBS_COEF:
-        reset_variant_in_progress(conn, variant_original, success=True)
+    def _empty_result(obs_coef=None, max_smd=None):
         return {
             "variant": variant_original,
             "n_treated": n_treated,
@@ -110,6 +55,32 @@ def process_single_variant(variant_col, variant_original, Ecols):
             "p_emp": None,
             "max_smd": max_smd
         }
+
+    if n_treated < MIN_TREATED or n_control == 0:
+        return _empty_result()
+
+    cols = [TARGET_COL, variant_col, "_match_variant"] + Ecols
+    df_model = df[cols].dropna()
+    if df_model.shape[0] < MIN_SAMPLE_SIZE:
+        return _empty_result()
+
+    matched_obs = match_control_units(df_model, "_match_variant", k=MATCH_K, covariates_for_matching=Ecols)
+    if matched_obs is None or matched_obs.shape[0] < MIN_SAMPLE_SIZE:
+        return _empty_result()
+
+    smd_results = check_balance(matched_obs, "_match_variant", Ecols)
+    max_smd = max(smd_results.values()) if smd_results else 1
+
+    formula = build_formula(TARGET_COL, variant_col, Ecols, [], matched_obs)
+    mod = smf.ols(formula=formula, data=matched_obs).fit()
+    interaction_name = _find_interaction_term(mod.params.index, variant_col)
+
+    if interaction_name is None:
+        return None
+
+    obs_coef = float(mod.params[interaction_name])
+    if obs_coef is None or abs(obs_coef) < MIN_OBS_COEF:
+        return _empty_result(obs_coef=obs_coef, max_smd=max_smd)
 
     rng = np.random.RandomState(RANDOM_STATE + (abs(hash(variant_col)) % 2_000_000))
 
@@ -126,9 +97,6 @@ def process_single_variant(variant_col, variant_original, Ecols):
         perm_betas.append(mod_perm.params.get(interaction_name, np.nan))
 
     perm_betas = np.array([x for x in perm_betas if not np.isnan(x)])
-    p_emp_light = float(np.mean(np.abs(perm_betas) >= np.abs(obs_coef))) if perm_betas.size > 0 else None
-
-    reset_variant_in_progress(conn, variant_original, success=True)
 
     return {
         "variant": variant_original,
@@ -137,6 +105,6 @@ def process_single_variant(variant_col, variant_original, Ecols):
         "obs_coef": obs_coef,
         "perm_mean": float(np.mean(perm_betas)) if perm_betas.size > 0 else None,
         "perm_std": float(np.std(perm_betas)) if perm_betas.size > 0 else None,
-        "p_emp": p_emp_light,
+        "p_emp": float(np.mean(np.abs(perm_betas) >= np.abs(obs_coef))) if perm_betas.size > 0 else None,
         "max_smd": max_smd
     }

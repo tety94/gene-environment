@@ -9,47 +9,54 @@ import random
 import pickle
 import os
 
-BATCH_SIZE = 100  # blocco di insert nel DB
-
-global_df = None
+BATCH_SIZE = 50  # risultati accumulati prima del bulk insert
 
 def init_worker():
     import modeling
     import db
 
-    # Carica dataframe globale
     with open("temp_df.pkl", "rb") as f:
         modeling.global_df = pickle.load(f)
 
-    # Connessione DB unica per worker
-    modeling.worker_conn = db.get_conn()
-    print(f"[INFO] Worker {os.getpid()} caricato global_df e connessione DB")
+    # I worker NON aprono connessioni DB — solo calcoli puri
+    modeling.worker_conn = None
+    print(f"[INFO] Worker {os.getpid()} caricato global_df (no DB)")
 
 def run_parallel_processing(variants, mapping, Ecols, description=""):
     print(f"[INFO] Avvio processi paralleli: {description} ({len(variants)} varianti)")
 
     buffer = []
+    completed = 0
+    skipped = 0
 
     with ProcessPoolExecutor(max_workers=MAX_WORKERS, initializer=init_worker) as ex:
-        futures = [ex.submit(process_single_variant, g, mapping[g], Ecols) for g in variants]
+        futures = {ex.submit(process_single_variant, g, mapping[g], Ecols): g for g in variants}
 
         for f in as_completed(futures):
+            variant_name = futures[f]
             try:
                 res = f.result()
-                if res:
+                if res is not None:
                     buffer.append(res)
+                    completed += 1
+                else:
+                    skipped += 1
 
-                # Inserisci a blocchi
+                # Bulk insert ogni BATCH_SIZE risultati — unica connessione, nessun lock
                 if len(buffer) >= BATCH_SIZE:
                     save_variant_result(buffer)
+                    print(f"[DB] Inseriti {len(buffer)} risultati (totale completati: {completed})")
                     buffer = []
 
             except Exception as e:
-                print("Errore in un processo:", e)
+                print(f"[ERROR] Variante {variant_name}: {e}")
 
-        # Inserisci eventuale residuo
+        # Flush residuo finale
         if buffer:
             save_variant_result(buffer)
+            print(f"[DB] Flush finale: {len(buffer)} risultati")
+
+    print(f"[INFO] Completati: {completed}, Saltati/None: {skipped}")
 
 def main():
     start_time = datetime.now()
@@ -58,7 +65,6 @@ def main():
     df, variant_cols_safe, mapping, Ecols, variant_cols = load_and_prepare_data()
     df.to_pickle("temp_df.pkl")
 
-    # Inserimento varianti nuove nel DB
     variants_to_insert = []
     for v in variant_cols:
         parts = v.split("_", 2)
@@ -75,7 +81,6 @@ def main():
 
     run_parallel_processing(variants_to_run, mapping, Ecols, description="primo run con permutazioni standard")
 
-    # ---------- CARICA RISULTATI E PLOT ----------
     results_df = load_variant_results()
     results_df = add_fdr(results_df)
     volcano_plot(results_df, save_path="volcano_plot_final.png")
@@ -85,10 +90,6 @@ def main():
     duration = end_time - start_time
     print(f"[END] Analisi terminata alle: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"[DURATION] Tempo totale: {str(duration)}")
-
-    # Chiudi connessione di ogni worker (globalmente importando modeling)
-    import modeling
-    modeling.worker_conn.close()
 
 if __name__ == "__main__":
     main()
