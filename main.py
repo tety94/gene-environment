@@ -27,7 +27,7 @@ def main():
 
     df, variant_cols_safe, mapping, Ecols, variant_cols = load_and_prepare_data()
     # df.to_pickle("/mnt/hereditary_dev/pkl/temp_df.pkl")
-    df.to_pickle("/temp_df.pkl")
+    df.to_pickle("temp_df.pkl")
 
     # Prepara la lista di dizionari da inserire nel DB
     variants_to_insert = []
