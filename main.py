@@ -8,12 +8,16 @@ from db import load_variant_results, insert_new_variants, get_variants_to_run
 import config
 import random
 import pickle
+import os
 
 global_df = None
 
 def init_worker():
-    global global_df
-    global_df = pickle.load(open("temp_df.pkl", "rb"))
+    import modeling
+    with open("temp_df.pkl", "rb") as f:
+        modeling.global_df = pickle.load(f)
+    print(f"[INFO] Worker {os.getpid()} caricato global_df")
+
 
 #todo: valutare split in discovery replication ed eventualmente valutare solo il beta concorde
 #todo: selezionare le varienti in base al linkage disequilibrium
