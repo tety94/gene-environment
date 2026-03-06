@@ -10,7 +10,7 @@ import pickle
 import os
 from db import get_conn
 
-BATCH_SIZE = 500  # risultati accumulati prima del bulk insert
+BATCH_SIZE = 50  # risultati accumulati prima del bulk insert
 
 def init_worker():
     import modeling

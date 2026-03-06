@@ -126,7 +126,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
     # ======================================================
     # PERMUTAZIONI HIGH — solo se light è significativo
     # ======================================================
-    if p_emp_light is not None and p_emp_light < PVALUE_THRESHOLD:
+    if p_emp_light is not None and p_emp_light <= PVALUE_THRESHOLD:
         n_additional = N_PERM_HIGH - N_PERM
         perm_betas_additional = []
 
