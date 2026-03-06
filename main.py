@@ -78,6 +78,10 @@ def main():
 
     end_time = datetime.now()
     duration = end_time - start_time
+
+    import modeling
+    conn = modeling.worker_conn
+    conn.close()
     print(f"[END] Analisi terminata alle: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"[DURATION] Tempo totale impiegato: {str(duration)}")
 

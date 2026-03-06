@@ -45,7 +45,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
     # -----------------------------
     if not mark_variant_in_progress(conn, variant_original):
         print(f"[INFO] Return: {variant_original} già in progress da un altro processo")
-        conn.close()
+        # conn.close()
         return None
 
     # Controlla se ci sono valori non numerici
@@ -75,7 +75,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
     if n_treated < MIN_TREATED or n_control == 0:
         print(f"[INFO] Return 3: {variant_original} numero insufficiente")
         save_variant_result_not_calculated(conn, variant_original, n_treated, n_control, None)
-        conn.close()
+        # conn.close()
         return None
 
     # -----------------------------
@@ -87,7 +87,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
     if df_model.shape[0] < MIN_SAMPLE_SIZE:
         print(f"[INFO] Return 4: {variant_original} numero insufficiente")
         save_variant_result_not_calculated(conn, variant_original, n_treated, n_control, None)
-        conn.close()
+        # conn.close()
         return None
 
     # -----------------------------
@@ -105,7 +105,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
     if matched_obs is None or matched_obs.shape[0] < MIN_SAMPLE_SIZE:
         print(f"[INFO] Return 5: {variant_original} numero insufficiente")
         save_variant_result_not_calculated(conn, variant_original, n_treated, n_control, None)
-        conn.close()
+        # conn.close()
         return None
 
     smd_results = check_balance(matched_obs, "_match_variant", cov_match)
@@ -115,7 +115,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
     if max_smd > 0.5:
         print(f"[WARN] Matching fallito per {variant_original} (Max SMD = {max_smd:.3f})")
         save_variant_result_not_calculated(conn, variant_original, n_treated, n_control, max_smd)
-        conn.close()
+        # conn.close()
         return variant_original
 
     # -----------------------------
@@ -127,7 +127,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
     interaction_name = _find_interaction_term(mod.params.index, variant_col)
 
     if interaction_name is None:
-        conn.close()
+        # conn.close()
         return None
 
     obs_coef = float(mod.params[interaction_name])
@@ -144,7 +144,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
             obs_coef, None, None, 1, N_PERM, max_smd
         )
         reset_variant_in_progress(conn, variant_original, success=True)
-        conn.close()
+        # conn.close()
         return variant_original
 
     rng = np.random.RandomState(RANDOM_STATE + (abs(hash(variant_col)) % 2_000_000))
@@ -252,6 +252,6 @@ def process_single_variant(variant_col, variant_original, Ecols):
     # COMPLETATO
     # -----------------------------
     reset_variant_in_progress(conn, variant_original, success=True)
-    conn.close()
+    # conn.close()
 
     return variant_original
