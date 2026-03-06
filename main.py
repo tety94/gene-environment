@@ -8,6 +8,7 @@ from db import load_variant_results, insert_new_variants, get_variants_to_run, s
 import random
 import pickle
 import os
+from db import get_conn
 
 BATCH_SIZE = 50  # risultati accumulati prima del bulk insert
 
