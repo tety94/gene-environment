@@ -29,34 +29,59 @@ def run_parallel_processing(variants, mapping, Ecols, description=""):
     completed = 0
     skipped = 0
 
-    with ProcessPoolExecutor(max_workers=MAX_WORKERS, initializer=init_worker) as ex:
-        futures = {ex.submit(process_single_variant, g, mapping[g], Ecols): g for g in variants}
+    # Connessione DB unica nel main process — nessun worker tocca il DB
+    conn = get_conn()
 
-        for f in as_completed(futures):
-            variant_name = futures[f]
-            try:
-                res = f.result()
-                if res is not None:
-                    buffer.append(res)
-                    completed += 1
-                else:
-                    skipped += 1
+    try:
+        with ProcessPoolExecutor(max_workers=MAX_WORKERS, initializer=init_worker) as ex:
+            futures = {ex.submit(process_single_variant, g, mapping[g], Ecols): g for g in variants}
 
-                # Bulk insert ogni BATCH_SIZE risultati — unica connessione, nessun lock
-                if len(buffer) >= BATCH_SIZE:
-                    save_variant_result(buffer)
-                    print(f"[DB] Inseriti {len(buffer)} risultati (totale completati: {completed})")
-                    buffer = []
+            for f in as_completed(futures):
+                variant_name = futures[f]
+                try:
+                    res = f.result()
+                    if res is not None:
+                        buffer.append(res)
+                        completed += 1
+                    else:
+                        skipped += 1
 
-            except Exception as e:
-                print(f"[ERROR] Variante {variant_name}: {e}")
+                    # Bulk insert ogni BATCH_SIZE risultati
+                    if len(buffer) >= BATCH_SIZE:
+                        _flush_buffer(conn, buffer)
+                        print(f"[DB] Inseriti {len(buffer)} risultati (totale: {completed})")
+                        buffer = []
+
+                except Exception as e:
+                    print(f"[ERROR] Variante {variant_name}: {e}")
 
         # Flush residuo finale
         if buffer:
-            save_variant_result(buffer)
+            _flush_buffer(conn, buffer)
             print(f"[DB] Flush finale: {len(buffer)} risultati")
 
+    finally:
+        conn.close()
+
     print(f"[INFO] Completati: {completed}, Saltati/None: {skipped}")
+
+
+def _flush_buffer(conn, buffer):
+    """Inserisce una lista di risultati nel DB spacchettando ogni dict."""
+    for res in buffer:
+        save_variant_result(
+            conn=conn,
+            variant=res["variant"],
+            mutati=res["n_treated"],
+            non_mutati=res["n_control"],
+            obs_coef=res["obs_coef"],
+            mean_coef=res["perm_mean"],
+            sd_coef=res["perm_std"],
+            empirical_p=res["p_emp"],
+            iterations=res.get("iterations"),   # aggiungi al dict di ritorno se serve
+            balance=res["max_smd"]
+        )
+    conn.commit()  # commit unico per tutto il batch
 
 def main():
     start_time = datetime.now()

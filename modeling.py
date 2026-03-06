@@ -53,8 +53,10 @@ def process_single_variant(variant_col, variant_original, Ecols):
             "perm_mean": None,
             "perm_std": None,
             "p_emp": None,
-            "max_smd": max_smd
+            "max_smd": max_smd,
+            "iterations": None
         }
+
 
     if n_treated < MIN_TREATED or n_control == 0:
         return _empty_result()
@@ -106,5 +108,6 @@ def process_single_variant(variant_col, variant_original, Ecols):
         "perm_mean": float(np.mean(perm_betas)) if perm_betas.size > 0 else None,
         "perm_std": float(np.std(perm_betas)) if perm_betas.size > 0 else None,
         "p_emp": float(np.mean(np.abs(perm_betas) >= np.abs(obs_coef))) if perm_betas.size > 0 else None,
-        "max_smd": max_smd
+        "max_smd": max_smd,
+        "iterations": int(perm_betas.size)  # <-- aggiunto
     }
