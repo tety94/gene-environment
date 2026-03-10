@@ -52,7 +52,7 @@ def get_empty_variants_gene():
 def update_variant_gene(conn, variant, gene_id, gene_name):
     cur = conn.cursor()
     cur.execute("""
-        UPDATE variant_results
+        UPDATE variant_results_significant
         SET gene=%s, gene_name=%s
         WHERE variant=%s AND gene IS NULL
     """, (gene_id, gene_name, variant))
