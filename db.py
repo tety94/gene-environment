@@ -271,7 +271,7 @@ def get_genes_to_annotate():
 
     cur.execute("""
 SELECT distinct vr.gene
-FROM variant_results vr 
+FROM variant_results_significant vr 
 LEFT JOIN gene_neuro_annotation gna 
 	ON vr.gene = gna.gene_id 
 where vr.gene is not null and vr.gene != 'NO-GENE'
