@@ -59,7 +59,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
             "empirical_p_significant": False
         }
 
-    if n_treated < MIN_TREATED or n_control == 0:
+    if n_treated < MIN_TREATED or n_control < MIN_TREATED:
         return _empty()
 
     cols = [TARGET_COL, variant_col, "_match_variant"] + Ecols
