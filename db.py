@@ -38,7 +38,7 @@ def get_empty_variants_gene():
     conn = get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT variant, mutation, position, chromosome FROM variant_results "
+        cur.execute("SELECT variant, mutation, position, chromosome FROM variant_results_significant "
                     " WHERE gene IS NULL AND empirical_p < %s AND iterations = %s",
                     (PVALUE_THRESHOLD, N_PERM_HIGH))
         rows = cur.fetchall()
