@@ -152,8 +152,8 @@ def insert_new_variants(variants):
     try:
         sql = """
         INSERT INTO variant_results 
-            (variant, chromosome, position, mutation, exposure, completed, in_progress, iterations)
-        VALUES (%s,%s,%s,%s,%s,0,0, %s)
+            (variant, chromosome, position, mutation, exposure, iterations)
+        VALUES (%s,%s,%s,%s,%s,%s)
         ON DUPLICATE KEY UPDATE variant=variant
         """
         data = []
