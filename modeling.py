@@ -74,8 +74,8 @@ def process_single_variant(variant_col, variant_original, Ecols):
     smd_results = check_balance(matched_obs, "_match_variant", Ecols)
     max_smd = max(smd_results.values()) if smd_results else 1
 
-    if max_smd > 0.5:
-    # if max_smd > 0.25:
+    # if max_smd > 0.5:
+    if max_smd > 0.25:
             return _empty(max_smd=max_smd)
 
     formula = build_formula(TARGET_COL, variant_col, Ecols, [], matched_obs)
