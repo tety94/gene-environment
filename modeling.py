@@ -44,6 +44,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
 
     n_treated = int((df["_match_variant"] == 1).sum())
     n_control = int((df["_match_variant"] == 0).sum())
+    print(n_control)
 
     def _empty(obs_coef=None, max_smd=None, iterations=N_PERM):
         return {
@@ -76,7 +77,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
 
     # if max_smd > 0.5:
     if max_smd > 0.25:
-            return _empty(max_smd=max_smd)
+        return _empty(max_smd=max_smd)
 
     formula = build_formula(TARGET_COL, variant_col, Ecols, [], matched_obs)
     mod = smf.ols(formula=formula, data=matched_obs).fit()
