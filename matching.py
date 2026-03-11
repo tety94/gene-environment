@@ -25,33 +25,40 @@ def _prepare_matching_matrix(df, cols):
     return X_scaled
 
 def match_control_units(df, variant_col, k=2, covariates_for_matching=None):
-    treated = df[df[variant_col] == 1].reset_index(drop=True)
-    control = df[df[variant_col] == 0].reset_index(drop=True)
+    group1 = df[df[variant_col] == 1].reset_index(drop=True)
+    group0 = df[df[variant_col] == 0].reset_index(drop=True)
 
-    if treated.shape[0] == 0 or control.shape[0] == 0:
+    if group1.shape[0] == 0 or group0.shape[0] == 0:
         return None
 
-    df_matching = pd.concat([treated, control], ignore_index=True)
+    # scegli il gruppo più piccolo come base
+    if group1.shape[0] <= group0.shape[0]:
+        base, other = group1, group0
+        base_label, other_label = 1, 0
+    else:
+        base, other = group0, group1
+        base_label, other_label = 0, 1
+
+    df_matching = pd.concat([base, other], ignore_index=True)
     X = _prepare_matching_matrix(df_matching, covariates_for_matching)
 
-    mask_t = df_matching[variant_col] == 1
-    X_t = X[mask_t]
-    X_c = X[~mask_t]
+    mask_base = df_matching[variant_col] == base_label
+    X_base = X[mask_base]
+    X_other = X[~mask_base]
 
-    if X_c.shape[0] == 0:
-        return None
+    k_used = min(k, X_other.shape[0])
+    nn = NearestNeighbors(n_neighbors=k_used).fit(X_other.values)
+    distances, indices = nn.kneighbors(X_base.values)
 
-    k_used = min(k, X_c.shape[0])
-    nn = NearestNeighbors(n_neighbors=k_used).fit(X_c.values)
-    distances, indices = nn.kneighbors(X_t.values)
+    selected_other_pos = np.unique(indices.flatten())
+    other_idx = X_other.index[selected_other_pos]
 
-    selected_ctrl_pos = np.unique(indices.flatten())
-    ctrl_idx = X_c.index[selected_ctrl_pos]
+    matched_other = df_matching.loc[other_idx]
+    matched_base = df_matching.loc[mask_base]
 
-    matched_controls = df_matching.loc[ctrl_idx]
-    matched_treated = df_matching.loc[mask_t]
-    matched_df = pd.concat([matched_treated, matched_controls], ignore_index=True)
+    matched_df = pd.concat([matched_base, matched_other], ignore_index=True)
     return matched_df
+
 
 def check_balance(matched_df, variant_col, covariates_for_matching):
     if matched_df is None:
