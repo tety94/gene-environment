@@ -24,13 +24,6 @@ def _find_interaction_term(mod_params_index, variant_col):
             return name
     return None
 
-def save_variant_result_not_calculated(conn, variant_original, muted, not_muted, max_smd =None):
-    save_variant_result(conn, variant_original, muted,not_muted, None, None, None, 1, N_PERM, max_smd)
-    reset_variant_in_progress(conn, variant_original, success=True)
-
-
-
-
 
 def process_single_variant(variant_col, variant_original, Ecols):
     df = global_df  # caricato dall'initializer, non da pickle ogni volta
@@ -84,7 +77,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
     interaction_name = _find_interaction_term(mod.params.index, variant_col)
 
     if interaction_name is None:
-        return None
+        return _empty()
 
     obs_coef = float(mod.params[interaction_name])
 
