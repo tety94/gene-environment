@@ -30,6 +30,12 @@ def load_and_prepare_data():
 
     print(f"[START] Merge file gene - ambiente: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     df = pd.merge(df_env, df_gen, on="id", how="inner")
+
+    print("rows:", df.shape[0])
+    print("unique ids:", df["id"].nunique())
+
+    df = df.drop_duplicates("id")
+
     df[TARGET_COL] = pd.to_numeric(df[TARGET_COL], errors="coerce")
 
     # ---------- STANDARDIZE ----------
