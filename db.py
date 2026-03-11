@@ -72,38 +72,39 @@ def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, 
     gene = None  # non presente in questo formato
 
     try:
-        cur.execute("""
-            INSERT INTO variant_results (
-                variant, gene, chromosome, position, mutation, mutati, non_mutati, obs_coef, mean_coef, 
-                sd_coef, empirical_p, iterations, balance, exposure, completed, generation, test
-            )
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,%s,%s)
-            ON DUPLICATE KEY UPDATE 
-                gene=VALUES(gene),
-                chromosome=VALUES(chromosome),
-                position=VALUES(position),
-                mutation=VALUES(mutation),
-                mutati=VALUES(mutati),
-                non_mutati=VALUES(non_mutati),
-                obs_coef=VALUES(obs_coef),
-                mean_coef=VALUES(mean_coef),
-                sd_coef=VALUES(sd_coef),
-                empirical_p=VALUES(empirical_p),
-                iterations=VALUES(iterations),
-                balance=VALUES(balance),
-                exposure=VALUES(exposure),
-                completed=1,
-                generation=VALUES(generation),
-                test=VALUES(test),
-                
-        """, (
-            variant, gene, chromosome, position, mutation, mutati, non_mutati,
+        sql = """
+        UPDATE variant_results
+        SET
+            gene = %s,
+            chromosome = %s,
+            position = %s,
+            mutation = %s,
+            mutati = %s,
+            non_mutati = %s,
+            obs_coef = %s,
+            mean_coef = %s,
+            sd_coef = %s,
+            empirical_p = %s,
+            iterations = %s,
+            balance = %s,
+            completed = 1
+        WHERE variant = %s AND exposure = %s AND generation = %s AND test = %s
+        """
+
+        cur.execute(sql, (
+            gene,
+            chromosome,
+            position,
+            mutation,
+            mutati,
+            non_mutati,
             safe_val(obs_coef),
             safe_val(mean_coef),
             safe_val(sd_coef),
             safe_val(empirical_p),
             safe_val(iterations),
             safe_val(balance),
+            variant,
             EXPOSURE,
             GENERATION,
             TEST
