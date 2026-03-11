@@ -154,7 +154,7 @@ def insert_new_variants(variants):
 
     conn = get_conn()
     cursor = conn.cursor()
-
+    print(f"EXPOSURE={EXPOSURE!r}, GENERATION={GENERATION!r}, TEST={TEST!r}")
     try:
         sql = """
             INSERT IGNORE INTO variant_results 
