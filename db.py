@@ -243,7 +243,7 @@ def get_variants_to_run(mapping, variant_cols_safe):
         SELECT variant 
         FROM variant_results 
         WHERE (completed=1 OR in_progress=1) 
-          AND exposure=%s 
+          AND exposure=%s
     """, (EXPOSURE))
 
     done_variants = set(row[0] for row in cur.fetchall())
