@@ -157,22 +157,21 @@ def insert_new_variants(variants):
 
     try:
         sql = """
-        INSERT INTO variant_results 
-            (variant, chromosome, position, mutation, exposure, iterations)
-        VALUES (%s,%s,%s,%s,%s,%s)
-        ON DUPLICATE KEY UPDATE variant=variant
-        """
+            INSERT IGNORE INTO variant_results 
+                (variant, chromosome, position, mutation, exposure, generation, test)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            """
         data = []
         for v in variants:
             chrom = v.get("chromosome")
-            # se chromosome è un numero valido lo converte a int, altrimenti lascia None
             chrom = int(chrom) if chrom is not None and str(chrom).isdigit() else None
             pos = v.get("position")
             pos = int(pos) if pos is not None and str(pos).isdigit() else None
-            data.append((v["variant"], chrom, pos, v.get("mutation"), EXPOSURE, N_PERM))
+            data.append((v["variant"], chrom, pos, v.get("mutation"), EXPOSURE, GENERATION, TEST))
 
         cursor.executemany(sql, data)
         conn.commit()
+
         print(f"[INFO] Inserite/aggiornate {cursor.rowcount} varianti nel DB")
     finally:
         cursor.close()
