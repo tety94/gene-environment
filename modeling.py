@@ -37,7 +37,6 @@ def process_single_variant(variant_col, variant_original, Ecols):
 
     n_treated = int((df["_match_variant"] == 1).sum())
     n_control = int((df["_match_variant"] == 0).sum())
-    print(n_control)
 
     def _empty(obs_coef=None, max_smd=None, iterations=N_PERM):
         return {
@@ -60,9 +59,7 @@ def process_single_variant(variant_col, variant_original, Ecols):
     df_model = df[cols].dropna()
     if df_model.shape[0] < MIN_SAMPLE_SIZE:
         return _empty()
-    print(
-        f"| treated prima dropna: {(df_model['_match_variant'] == 1).sum()} | controls: {(df_model['_match_variant'] == 0).sum()}"
-    )
+
     matched_obs = match_control_units(df_model, "_match_variant", k=MATCH_K, covariates_for_matching=Ecols)
     if matched_obs is None or matched_obs.shape[0] < MIN_SAMPLE_SIZE:
         return _empty()
