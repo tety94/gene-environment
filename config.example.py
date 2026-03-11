@@ -5,6 +5,10 @@ RAW_FILE = ""
 ENV_FILE = ""
 TEMP_DF_PATH = ""
 
+GENERATION=1
+TEST='0_1'
+
+
 # DATA SETTINGS
 SEP = ';'
 DECIMAL = '.'

@@ -1,6 +1,7 @@
 # db.py
 import mysql.connector
-from config import DB_USER, DB_PASSWORD, DB_NAME, DB_HOST, DB_PORT, EXPOSURE, N_PERM_HIGH, PVALUE_THRESHOLD, N_PERM
+from config import DB_USER, DB_PASSWORD, DB_NAME, DB_HOST, DB_PORT, EXPOSURE, N_PERM_HIGH, PVALUE_THRESHOLD, N_PERM, \
+    TEST, GENERATION
 import pandas as pd
 import math
 import numpy as np
@@ -74,9 +75,9 @@ def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, 
         cur.execute("""
             INSERT INTO variant_results (
                 variant, gene, chromosome, position, mutation, mutati, non_mutati, obs_coef, mean_coef, 
-                sd_coef, empirical_p, iterations, balance, exposure, completed 
+                sd_coef, empirical_p, iterations, balance, exposure, completed, generation, test
             )
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,%s,%s)
             ON DUPLICATE KEY UPDATE 
                 gene=VALUES(gene),
                 chromosome=VALUES(chromosome),
@@ -91,7 +92,10 @@ def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, 
                 iterations=VALUES(iterations),
                 balance=VALUES(balance),
                 exposure=VALUES(exposure),
-                completed=1
+                completed=1,
+                generation=VALUES(generation),
+                test=VALUES(test),
+                
         """, (
             variant, gene, chromosome, position, mutation, mutati, non_mutati,
             safe_val(obs_coef),
@@ -100,7 +104,9 @@ def save_variant_result(conn, variant, mutati, non_mutati, obs_coef, mean_coef, 
             safe_val(empirical_p),
             safe_val(iterations),
             safe_val(balance),
-            EXPOSURE
+            EXPOSURE,
+            GENERATION,
+            TEST
         ))
     finally:
         cur.close()
