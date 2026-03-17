@@ -13,15 +13,14 @@ import csv
 import pandas as pd
 from collections import defaultdict
 
+component = 'vigneti'
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
-# VARIANTS_CSV   = "/srv/python-projects/gene-environment/variants_to_extract.csv"
-VARIANTS_CSV   = "/srv/python-projects/gene-environment/variant_to_extract_vigneti.csv"
+VARIANTS_CSV   = f"/srv/python-projects/gene-environment/variant_to_extract_{component}.csv"
 GEN2_DIR       = "/mnt/cresla_prod/genome_datasets/gen2"
 GEN3_DIR       = "/mnt/cresla_prod/genome_datasets/gen3"
 OUT_GEN2       = "/srv/python-projects/gene-environment/output_gen2.csv"
 OUT_GEN3       = "/srv/python-projects/gene-environment/output_gen3.csv"
-# OUT_COMBINED   = "/srv/python-projects/gene-environment/output_combined.csv"
-OUT_COMBINED   = "/srv/python-projects/gene-environment/output_combined_vigneti.csv"
+OUT_COMBINED   = f"/srv/python-projects/gene-environment/output_combined_{component}.csv"
 
 GEN_PREFIX = {
     GEN2_DIR: "gen2",
