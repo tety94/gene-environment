@@ -33,7 +33,7 @@ def load_variants(path):
     """Legge il CSV delle varianti e restituisce una lista di dict."""
     variants = []
     with open(path, newline="") as f:
-        reader = csv.DictReader(f, delimiter=";")
+        reader = csv.DictReader(f, delimiter=",")
         for row in reader:
             variants.append({
                 "chrom": str(row["chromosome"]),
