@@ -41,7 +41,7 @@ def get_empty_variants_gene():
     try:
         cur.execute("SELECT variant, mutation, position, chromosome FROM variant_results_significant "
                     " WHERE gene IS NULL  AND iterations = %s",
-                    N_PERM_HIGH)
+                    [N_PERM_HIGH])
         rows = cur.fetchall()
         df = pd.DataFrame(rows, columns=["variant", "mutation", "position", "chromosome"])
     finally:
