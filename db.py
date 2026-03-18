@@ -250,7 +250,8 @@ def get_variants_to_run(mapping, variant_cols_safe):
         FROM variant_results 
         WHERE (completed=1 OR in_progress=1) 
           AND exposure=%s
-    """, (EXPOSURE,))
+          AND generation=%s
+    """, (EXPOSURE,GENERATION))
 
     done_variants = set(row[0] for row in cur.fetchall())
     print(f"[INFO] done_variants dal DB: {len(done_variants)}")
