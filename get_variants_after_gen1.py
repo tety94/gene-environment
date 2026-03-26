@@ -13,7 +13,7 @@ import csv
 import pandas as pd
 from collections import defaultdict
 
-component = 'seminativi'
+component = 'vigneti'
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
 VARIANTS_CSV   = f"/srv/python-projects/gene-environment/variant_to_extract_{component}.csv"
 GEN2_DIR       = "/mnt/cresla_prod/genome_datasets/gen2"
