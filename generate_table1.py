@@ -96,6 +96,14 @@ DEMOGRAPHIC_OVERLAP_COLS = ["sex", "onset_site", "onset_age", "diagnostic_delay"
 # Pattern per individuare automaticamente le variabili ambientali (6 buffer x 3 categorie)
 BUFFER_VAR_PATTERN = re.compile(r"^(seminativi|vigneti|risaie)_(\d+)$")
 
+# Alcune colonne categoriche (es. parals_codals) possono contenere valori "codice"
+# residui (es. "COD-0001", "RES00123") che non sono vere categorie ma id/codici
+# finiti per errore nella colonna. Questi valori vengono trattati come mancanti
+# (NaN) solo per quella variabile specifica, senza escludere il paziente
+# dall'analisi delle altre variabili.
+CODE_LIKE_PATTERN = re.compile(r"^[A-Za-z]{2,6}-?\d{2,}$")
+COLUMNS_TO_CLEAN_CODE_LIKE = ["parals_codals"]
+
 ALPHA = 0.05
 
 
@@ -215,6 +223,24 @@ def merge_side_file(cohort_df, side_df, side_name, cohort_name, log):
         f"colonne aggiunte: {new_cols}; id senza corrispondenza in {side_name}: {n_missing}"
     )
     return merged
+
+
+def clean_code_like_values(df, columns, log):
+    """Sostituisce con NaN i valori che sembrano codici/id (es. 'COD-0001')
+    invece di vere categorie, nelle colonne indicate."""
+    for col in columns:
+        if col not in df.columns:
+            continue
+        s = df[col].astype(str)
+        mask = s.str.match(CODE_LIKE_PATTERN, na=False)
+        n_bad = mask.sum()
+        if n_bad > 0:
+            examples = sorted(df.loc[mask, col].astype(str).unique())[:5]
+            log.add(f"Pulizia '{col}': {n_bad} valori tipo-codice trattati come mancanti "
+                     f"(esempi: {examples}); categorie valide rimaste: "
+                     f"{sorted(df.loc[~mask, col].dropna().astype(str).unique())}")
+            df.loc[mask, col] = np.nan
+    return df
 
 
 # ----------------------------------------------------------------------------
@@ -650,6 +676,8 @@ def main():
 
     log.add(f"Dataset finale: {full.shape[0]} righe, {full.shape[1]} colonne. "
             f"Distribuzione '{GROUP_COL}': {full[GROUP_COL].value_counts().to_dict()}")
+
+    full = clean_code_like_values(full, COLUMNS_TO_CLEAN_CODE_LIKE, log)
 
     buffer_vars = detect_buffer_vars(full)
     continuous_vars = [v for v in BASE_CONTINUOUS_VARS if v in full.columns]
