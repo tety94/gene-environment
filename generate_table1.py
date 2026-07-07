@@ -422,7 +422,10 @@ def plot_continuous_box(df, var, group_col, g1, g2, out_path, log):
         return None
     p = mannwhitney_p(s1, s2)
     fig, ax = plt.subplots(figsize=(5, 4.5))
-    bp = ax.boxplot([s1, s2], labels=[str(g1), str(g2)], patch_artist=True, showmeans=True)
+    try:
+        bp = ax.boxplot([s1, s2], tick_labels=[str(g1), str(g2)], patch_artist=True, showmeans=True)
+    except TypeError:
+        bp = ax.boxplot([s1, s2], labels=[str(g1), str(g2)], patch_artist=True, showmeans=True)
     colors = ["#4C72B0", "#DD8452"]
     for patch, c in zip(bp["boxes"], colors):
         patch.set_facecolor(c)
