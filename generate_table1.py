@@ -8,11 +8,11 @@ Genera la "Tabella 1" di un paper (confronto Corte 1 vs Corte 2) a partire da:
 
   - componenti_ambientali_1.csv   -> dati corte 1 (demografia + variabili ambientali)
   - componenti_ambientali_2.csv   -> dati corte 2 (demografia + variabili ambientali)
-  - componenti_ambientali_fumo.csv        -> fumo_boolean (parals_codals comuni a corte 1 e 2)
-  - componenti_ambientali_scolarita.csv   -> education_level / education_years (parals_codals comuni)
+  - componenti_ambientali_fumo.csv        -> fumo_boolean (id comuni a corte 1 e 2)
+  - componenti_ambientali_scolarita.csv   -> education_level / education_years (id comuni)
 
 Logica:
-  1. Ogni corte viene arricchita (LEFT JOIN su "parals_codals") con le colonne *nuove*
+  1. Ogni corte viene arricchita (LEFT JOIN su "id") con le colonne *nuove*
      presenti nei file fumo/scolarita (le colonne demografiche duplicate come
      sex/onset_site/onset_age/diagnostic_delay vengono ignorate in fase di
      join per evitare conflitti, ma vengono controllate per coerenza).
@@ -66,13 +66,18 @@ COHORT2_FILE = "componenti_ambientali_2.csv"
 FUMO_FILE = "componenti_ambientali_fumo.csv"
 SCOLARITA_FILE = "componenti_ambientali_scolarita.csv"
 
-ID_COL = "parals_codals"
+ID_COL = "id"
+
+# Colonna usata per definire i due gruppi da confrontare in Tabella 1
+# (PARALS vs CODALS), NON il file di provenienza.
+GROUP_COL = "parals_codals"
 
 # Variabili demografiche/cliniche continue attese nei file corte (se presenti)
 BASE_CONTINUOUS_VARS = ["onset_age", "diagnostic_delay", "survival"]
 
 # Variabili demografiche/cliniche categoriche attese nei file corte (se presenti)
-BASE_CATEGORICAL_VARS = ["sex", "onset_site", "parals_codals"]
+# NB: parals_codals è la variabile di raggruppamento, quindi non compare qui.
+BASE_CATEGORICAL_VARS = ["sex", "onset_site"]
 
 # Colonne "demografiche" duplicate nei file fumo/scolarita: NON vengono importate
 # in join (si tiene la versione presente nel file di corte), ma vengono
@@ -351,7 +356,7 @@ def save_table1_docx(rows, g1, g2, path, images_for_appendix=None):
     doc = Document()
 
     title = doc.add_heading("Tabella 1. Caratteristiche demografiche, cliniche e ambientali "
-                             "per corte di studio", level=1)
+                             "per gruppo di studio (PARALS vs CODALS)", level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     subtitle = doc.add_paragraph()
@@ -568,16 +573,28 @@ def main():
         log.save(os.path.join(out_dir, "run_log.txt"))
         sys.exit(1)
 
-    cohort1 = merge_side_file(cohort1, fumo, "fumo", "Corte 1", log)
-    cohort1 = merge_side_file(cohort1, scolarita, "scolarita", "Corte 1", log)
-    cohort2 = merge_side_file(cohort2, fumo, "fumo", "Corte 2", log)
-    cohort2 = merge_side_file(cohort2, scolarita, "scolarita", "Corte 2", log)
+    # componenti_ambientali_1 e _2 vengono unite (stesso set di pazienti/colonne);
+    # se un id compare in entrambi i file si tiene una sola riga per evitare duplicati.
+    raw_combined = pd.concat([cohort1, cohort2], ignore_index=True, sort=False)
+    n_before = raw_combined.shape[0]
+    raw_combined = raw_combined.drop_duplicates(subset=ID_COL, keep="first")
+    n_after = raw_combined.shape[0]
+    if n_before != n_after:
+        log.add(f"Uniti componenti_ambientali_1 e _2: {n_before} righe -> {n_after} righe dopo deduplica su id "
+                 f"({n_before - n_after} duplicati rimossi)")
+    else:
+        log.add(f"Uniti componenti_ambientali_1 e _2: {n_after} righe, nessun id duplicato trovato")
 
-    cohort1["corte"] = "Corte 1"
-    cohort2["corte"] = "Corte 2"
+    if GROUP_COL not in raw_combined.columns:
+        log.add(f"ERRORE FATALE: colonna di raggruppamento '{GROUP_COL}' non trovata nei file di corte")
+        log.save(os.path.join(out_dir, "run_log.txt"))
+        sys.exit(1)
 
-    full = pd.concat([cohort1, cohort2], ignore_index=True, sort=False)
-    log.add(f"Dataset combinato: {full.shape[0]} righe, {full.shape[1]} colonne")
+    full = merge_side_file(raw_combined, fumo, "fumo", "dataset combinato", log)
+    full = merge_side_file(full, scolarita, "scolarita", "dataset combinato", log)
+
+    log.add(f"Dataset finale: {full.shape[0]} righe, {full.shape[1]} colonne. "
+            f"Distribuzione '{GROUP_COL}': {full[GROUP_COL].value_counts().to_dict()}")
 
     buffer_vars = detect_buffer_vars(full)
     continuous_vars = [v for v in BASE_CONTINUOUS_VARS if v in full.columns]
@@ -585,7 +602,7 @@ def main():
         continuous_vars.append("education_years")
     continuous_vars += buffer_vars
 
-    categorical_vars = [v for v in BASE_CATEGORICAL_VARS if v in full.columns]
+    categorical_vars = [v for v in BASE_CATEGORICAL_VARS if v in full.columns and v != GROUP_COL]
     if "fumo_boolean" in full.columns:
         categorical_vars.append("fumo_boolean")
     if "education_level" in full.columns:
@@ -594,7 +611,7 @@ def main():
     log.add(f"Variabili continue analizzate ({len(continuous_vars)}): {continuous_vars}")
     log.add(f"Variabili categoriche analizzate ({len(categorical_vars)}): {categorical_vars}")
 
-    rows, g1, g2 = build_table1(full, "corte", continuous_vars, categorical_vars, log)
+    rows, g1, g2 = build_table1(full, GROUP_COL, continuous_vars, categorical_vars, log)
 
     csv_path = os.path.join(out_dir, "table1.csv")
     save_table1_csv(rows, g1, g2, csv_path)
@@ -607,20 +624,20 @@ def main():
     appendix_images = []
 
     for var in [v for v in BASE_CONTINUOUS_VARS + (["education_years"] if "education_years" in full.columns else []) if v in full.columns]:
-        p = plot_continuous_box(full, var, "corte", g1, g2, os.path.join(img_dir, f"boxplot_{var}.png"), log)
+        p = plot_continuous_box(full, var, GROUP_COL, g1, g2, os.path.join(img_dir, f"boxplot_{var}.png"), log)
         if p:
             appendix_images.append((p, f"Distribuzione di {var} per corte"))
 
     for var in categorical_vars:
-        p = plot_categorical_bar(full, var, "corte", g1, g2, img_dir, log)
+        p = plot_categorical_bar(full, var, GROUP_COL, g1, g2, img_dir, log)
         if p:
             appendix_images.append((p, f"Distribuzione di {var} per corte"))
 
     for category in ["seminativi", "vigneti", "risaie"]:
-        p1 = plot_buffer_grouped_box(full, category, "corte", g1, g2, img_dir, log)
+        p1 = plot_buffer_grouped_box(full, category, GROUP_COL, g1, g2, img_dir, log)
         if p1:
             appendix_images.append((p1, f"{category}: boxplot per buffer, {g1} vs {g2}"))
-        p2 = plot_buffer_pvalue_trend(full, category, "corte", g1, g2, img_dir, log)
+        p2 = plot_buffer_pvalue_trend(full, category, GROUP_COL, g1, g2, img_dir, log)
         if p2:
             appendix_images.append((p2, f"{category}: andamento del p-value al variare del buffer"))
 
