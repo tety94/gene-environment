@@ -101,7 +101,7 @@ BUFFER_VAR_PATTERN = re.compile(r"^(seminativi|vigneti|risaie)_(\d+)$")
 # finiti per errore nella colonna. Questi valori vengono trattati come mancanti
 # (NaN) solo per quella variabile specifica, senza escludere il paziente
 # dall'analisi delle altre variabili.
-CODE_LIKE_PATTERN = re.compile(r"^[A-Za-z]{2,6}-?\d{2,}$")
+CODE_LIKE_PATTERN = re.compile(r"^[A-Za-z]{2,10}(-\d{2,6}){1,3}$")
 COLUMNS_TO_CLEAN_CODE_LIKE = ["parals_codals"]
 
 ALPHA = 0.05
