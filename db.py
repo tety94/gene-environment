@@ -269,6 +269,47 @@ def get_variants_to_run(mapping, variant_cols_safe):
     return variants_to_run
 
 
+def get_significant_results():
+    """
+    Ritorna i risultati di variant_results che hanno superato il test (empirical_p <
+    PVALUE_THRESHOLD, al run ad alta risoluzione N_PERM_HIGH) ED entrambe le coorti
+    (generation=1 e generation=2), per la stessa tripla (variant, exposure, test).
+
+    ASSUNZIONE: "significativo in entrambe le coorti" = stessa combinazione
+    (variant, exposure, test) presente sia con generation=1 sia con generation=2,
+    ciascuna con empirical_p sotto soglia. Se invece vuoi il match solo su `variant`
+    (indipendentemente da exposure/test), basta togliere "exposure", "test" dal
+    groupby qui sotto.
+    """
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("""
+            SELECT variant, exposure, test, generation, chromosome, position, mutation,
+                   obs_coef, mean_coef, sd_coef, empirical_p, mutati, non_mutati, balance
+            FROM variant_results
+            WHERE completed = 1
+              AND iterations = %s
+              AND empirical_p < %s
+              AND generation IN (1, 2)
+        """, (N_PERM_HIGH, PVALUE_THRESHOLD))
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+
+    # tieni solo le triple presenti in ENTRAMBE le generation (1 e 2)
+    g = df.groupby(["variant", "exposure", "test"])["generation"].nunique()
+    keep = g[g >= 2].index
+    df = df.set_index(["variant", "exposure", "test"]).loc[keep].reset_index()
+
+    return df.sort_values(["variant", "generation"]).reset_index(drop=True)
+
+
 def get_genes_to_annotate():
     """
     """
