@@ -8,11 +8,11 @@ Genera la "Tabella 1" di un paper (confronto Corte 1 vs Corte 2) a partire da:
 
   - componenti_ambientali_1.csv   -> dati corte 1 (demografia + variabili ambientali)
   - componenti_ambientali_2.csv   -> dati corte 2 (demografia + variabili ambientali)
-  - componenti_ambientali_fumo.csv        -> fumo_boolean (id comuni a corte 1 e 2)
-  - componenti_ambientali_scolarita.csv   -> education_level / education_years (id comuni)
+  - componenti_ambientali_fumo.csv        -> fumo_boolean (parals_codals comuni a corte 1 e 2)
+  - componenti_ambientali_scolarita.csv   -> education_level / education_years (parals_codals comuni)
 
 Logica:
-  1. Ogni corte viene arricchita (LEFT JOIN su "id") con le colonne *nuove*
+  1. Ogni corte viene arricchita (LEFT JOIN su "parals_codals") con le colonne *nuove*
      presenti nei file fumo/scolarita (le colonne demografiche duplicate come
      sex/onset_site/onset_age/diagnostic_delay vengono ignorate in fase di
      join per evitare conflitti, ma vengono controllate per coerenza).
@@ -66,7 +66,7 @@ COHORT2_FILE = "componenti_ambientali_2.csv"
 FUMO_FILE = "componenti_ambientali_fumo.csv"
 SCOLARITA_FILE = "componenti_ambientali_scolarita.csv"
 
-ID_COL = "id"
+ID_COL = "parals_codals"
 
 # Variabili demografiche/cliniche continue attese nei file corte (se presenti)
 BASE_CONTINUOUS_VARS = ["onset_age", "diagnostic_delay", "survival"]
