@@ -271,43 +271,49 @@ def get_variants_to_run(mapping, variant_cols_safe):
 
 def get_significant_results():
     """
-    Ritorna i risultati di variant_results che hanno superato il test (empirical_p <
-    PVALUE_THRESHOLD, al run ad alta risoluzione N_PERM_HIGH) ED entrambe le coorti
-    (generation=1 e generation=2), per la stessa tripla (variant, exposure, test).
+    Chiama la stored procedure `get_significant_results()` che ritorna, per ogni
+    variante significativa in ENTRAMBE le coorti, una riga con i risultati di
+    generation=1 (vrs1) e generation=2 (vrs2) affiancati.
 
-    ASSUNZIONE: "significativo in entrambe le coorti" = stessa combinazione
-    (variant, exposure, test) presente sia con generation=1 sia con generation=2,
-    ciascuna con empirical_p sotto soglia. Se invece vuoi il match solo su `variant`
-    (indipendentemente da exposure/test), basta togliere "exposure", "test" dal
-    groupby qui sotto.
+    ATTENZIONE: la query della stored procedure ha `empirical_p`, `mutati` e
+    `non_mutati` duplicati (uno da vrs1, uno da vrs2, stesso nome colonna). Uso
+    un cursor POSIZIONALE (non a dizionario) e assegno i nomi qui sotto in base
+    all'ordine delle colonne nel SELECT — se l'ordine reale della stored
+    procedure cambia, verifica/aggiorna la lista `columns`.
     """
     conn = get_conn()
-    cur = conn.cursor(dictionary=True)
+    cur = conn.cursor()  # NB: non dictionary=True, per via delle colonne duplicate
     try:
-        cur.execute("""
-            SELECT variant, exposure, test, generation, chromosome, position, mutation,
-                   obs_coef, mean_coef, sd_coef, empirical_p, mutati, non_mutati, balance
-            FROM variant_results
-            WHERE completed = 1
-              AND iterations = %s
-              AND empirical_p < %s
-              AND generation IN (1, 2)
-        """, (N_PERM_HIGH, PVALUE_THRESHOLD))
-        rows = cur.fetchall()
+        cur.callproc("get_significant_results")
+        rows = []
+        for result in cur.stored_results():
+            rows.extend(result.fetchall())
     finally:
         cur.close()
         conn.close()
 
-    df = pd.DataFrame(rows)
+    # ordine atteso, coerente col SELECT della stored procedure:
+    # gene_name, variant, empirical_p(g1), obs_coef_g1, empirical_p(g2), obs_coef_g2,
+    # mutati(g1), non_mutati(g1), mutati(g2), non_mutati(g2)
+    columns = [
+        "gene_name", "variant",
+        "empirical_p_g1", "obs_coef_g1",
+        "empirical_p_g2", "obs_coef_g2",
+        "mutati_g1", "non_mutati_g1",
+        "mutati_g2", "non_mutati_g2",
+    ]
+    df = pd.DataFrame(rows, columns=columns)
     if df.empty:
         return df
 
-    # tieni solo le triple presenti in ENTRAMBE le generation (1 e 2)
-    g = df.groupby(["variant", "exposure", "test"])["generation"].nunique()
-    keep = g[g >= 2].index
-    df = df.set_index(["variant", "exposure", "test"]).loc[keep].reset_index()
+    # chromosome/position/mutation derivati dal nome variante, stesso schema
+    # usato altrove nel progetto (split max 2, es. "10_59598045_C_T")
+    parts = df["variant"].str.split("_", n=2, expand=True)
+    df["chromosome"] = parts[0]
+    df["position"] = parts[1]
+    df["mutation"] = parts[2]
 
-    return df.sort_values(["variant", "generation"]).reset_index(drop=True)
+    return df
 
 
 def get_genes_to_annotate():
