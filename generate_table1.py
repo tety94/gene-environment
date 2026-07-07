@@ -632,13 +632,14 @@ def main():
                  f"assegnati a Corte 1 per priorità.")
 
     def assign_cohort(id_val):
-        if id_val in gen1_ids:
+        doubled = f"{id_val}_{id_val}"
+        if id_val in gen1_ids or doubled in gen1_ids:
             return "Corte 1"
-        elif id_val in gen2_ids:
+        if id_val in gen2_ids or doubled in gen2_ids:
             return "Corte 2"
         return None
 
-    full[GROUP_COL] = full[ID_COL].map(assign_cohort)
+    full[GROUP_COL] = full[ID_COL].astype(str).map(assign_cohort)
 
     n_unassigned = full[GROUP_COL].isna().sum()
     if n_unassigned > 0:
