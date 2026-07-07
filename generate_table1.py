@@ -68,16 +68,25 @@ SCOLARITA_FILE = "componenti_ambientali_scolarita.csv"
 
 ID_COL = "id"
 
-# Colonna usata per definire i due gruppi da confrontare in Tabella 1
-# (PARALS vs CODALS), NON il file di provenienza.
-GROUP_COL = "parals_codals"
+# File genotipici che definiscono l'appartenenza reale alle due corti
+# (l'id in componenti_ambientali_1/2.csv corrisponde ESATTAMENTE, con
+# duplicazione, all'id in questi file: es. "RES02977_RES02977").
+# Corte 1 = id presenti nel file gen1 (RES...), Corte 2 = id presenti nel file
+# gen2 (ACH...). Se un id compare in entrambi, vince Corte 1.
+GEN1_IDS_FILE_DEFAULT = "/mnt/cresla_prod/genome_datasets/merged_csv/full_chr_gen1_test1.csv"
+GEN2_IDS_FILE_DEFAULT = "/srv/python-projects/gene-environment/output_combined_risaie.csv"
+
+# Colonna calcolata usata per il confronto in Tabella 1 ("Corte 1"/"Corte 2"),
+# derivata dall'appartenenza ai file genotipici sopra, NON da parals_codals
+# (che è solo un'etichetta arbitraria e viene trattata come normale variabile
+# categorica descrittiva).
+GROUP_COL = "corte"
 
 # Variabili demografiche/cliniche continue attese nei file corte (se presenti)
 BASE_CONTINUOUS_VARS = ["onset_age", "diagnostic_delay", "survival"]
 
 # Variabili demografiche/cliniche categoriche attese nei file corte (se presenti)
-# NB: parals_codals è la variabile di raggruppamento, quindi non compare qui.
-BASE_CATEGORICAL_VARS = ["sex", "onset_site"]
+BASE_CATEGORICAL_VARS = ["sex", "onset_site", "parals_codals"]
 
 # Colonne "demografiche" duplicate nei file fumo/scolarita: NON vengono importate
 # in join (si tiene la versione presente nel file di corte), ma vengono
@@ -88,6 +97,27 @@ DEMOGRAPHIC_OVERLAP_COLS = ["sex", "onset_site", "onset_age", "diagnostic_delay"
 BUFFER_VAR_PATTERN = re.compile(r"^(seminativi|vigneti|risaie)_(\d+)$")
 
 ALPHA = 0.05
+
+
+def load_ids_from_genotype_file(path, log, label):
+    """Legge SOLO il primo campo (id) di ogni riga di un file genotipico,
+    senza parsare le migliaia di colonne SNP successive. Efficiente anche su
+    file molto grandi perché si ferma alla prima virgola di ogni riga."""
+    if not os.path.exists(path):
+        log.add(f"ERRORE: file genotipico non trovato per {label} -> {path}")
+        return set()
+    ids = set()
+    n_lines = 0
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        f.readline()  # header
+        for line in f:
+            n_lines += 1
+            comma_idx = line.find(",")
+            id_val = line[:comma_idx].strip() if comma_idx != -1 else line.strip()
+            if id_val:
+                ids.add(id_val)
+    log.add(f"File genotipico {label} ({path}): {n_lines} righe, {len(ids)} id unici")
+    return ids
 
 
 # ----------------------------------------------------------------------------
@@ -356,7 +386,7 @@ def save_table1_docx(rows, g1, g2, path, images_for_appendix=None):
     doc = Document()
 
     title = doc.add_heading("Tabella 1. Caratteristiche demografiche, cliniche e ambientali "
-                             "per gruppo di studio (PARALS vs CODALS)", level=1)
+                             "per corte di studio", level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     subtitle = doc.add_paragraph()
@@ -551,8 +581,12 @@ def plot_categorical_bar(df, var, group_col, g1, g2, out_dir, log):
 
 def main():
     parser = argparse.ArgumentParser(description="Genera Tabella 1 (Corte 1 vs Corte 2) con test statistici e figure")
-    parser.add_argument("--input-dir", default=".", help="Cartella con i 4 csv in input")
+    parser.add_argument("--input-dir", default=".", help="Cartella con i 4 csv ambientali/demografici in input")
     parser.add_argument("--output-dir", default="output", help="Cartella di output")
+    parser.add_argument("--gen1-ids-file", default=GEN1_IDS_FILE_DEFAULT,
+                         help="File genotipico i cui id definiscono la Corte 1 (RES...)")
+    parser.add_argument("--gen2-ids-file", default=GEN2_IDS_FILE_DEFAULT,
+                         help="File genotipico i cui id definiscono la Corte 2 (ACH...)")
     args = parser.parse_args()
 
     out_dir = args.output_dir
@@ -573,8 +607,8 @@ def main():
         log.save(os.path.join(out_dir, "run_log.txt"))
         sys.exit(1)
 
-    # componenti_ambientali_1 e _2 vengono unite (stesso set di pazienti/colonne);
-    # se un id compare in entrambi i file si tiene una sola riga per evitare duplicati.
+    # componenti_ambientali_1 e _2 vengono unite (contengono lo stesso set di
+    # pazienti/colonne); se un id compare in entrambi si tiene una sola riga.
     raw_combined = pd.concat([cohort1, cohort2], ignore_index=True, sort=False)
     n_before = raw_combined.shape[0]
     raw_combined = raw_combined.drop_duplicates(subset=ID_COL, keep="first")
@@ -585,13 +619,33 @@ def main():
     else:
         log.add(f"Uniti componenti_ambientali_1 e _2: {n_after} righe, nessun id duplicato trovato")
 
-    if GROUP_COL not in raw_combined.columns:
-        log.add(f"ERRORE FATALE: colonna di raggruppamento '{GROUP_COL}' non trovata nei file di corte")
-        log.save(os.path.join(out_dir, "run_log.txt"))
-        sys.exit(1)
-
     full = merge_side_file(raw_combined, fumo, "fumo", "dataset combinato", log)
     full = merge_side_file(full, scolarita, "scolarita", "dataset combinato", log)
+
+    # ---------------- ASSEGNAZIONE CORTE DA FILE GENOTIPICI ----------------
+    gen1_ids = load_ids_from_genotype_file(args.gen1_ids_file, log, "gen1 (Corte 1, RES)")
+    gen2_ids = load_ids_from_genotype_file(args.gen2_ids_file, log, "gen2 (Corte 2, ACH)")
+
+    overlap = gen1_ids & gen2_ids
+    if overlap:
+        log.add(f"ATTENZIONE: {len(overlap)} id presenti in ENTRAMBI i file genotipici; "
+                 f"assegnati a Corte 1 per priorità.")
+
+    def assign_cohort(id_val):
+        if id_val in gen1_ids:
+            return "Corte 1"
+        elif id_val in gen2_ids:
+            return "Corte 2"
+        return None
+
+    full[GROUP_COL] = full[ID_COL].map(assign_cohort)
+
+    n_unassigned = full[GROUP_COL].isna().sum()
+    if n_unassigned > 0:
+        log.add(f"ATTENZIONE: {n_unassigned} id in componenti_ambientali non trovati in NESSUNO dei due file "
+                 f"genotipici; verranno esclusi dall'analisi. Controlla il formato dell'id "
+                 f"(atteso identico a quello genotipico, es. 'RES02977_RES02977').")
+        full = full.dropna(subset=[GROUP_COL])
 
     log.add(f"Dataset finale: {full.shape[0]} righe, {full.shape[1]} colonne. "
             f"Distribuzione '{GROUP_COL}': {full[GROUP_COL].value_counts().to_dict()}")
