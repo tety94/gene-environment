@@ -243,6 +243,22 @@ def clean_code_like_values(df, columns, log):
     return df
 
 
+def is_plausible_patient_id(id_val):
+    """Un id paziente plausibile non ha spazi, non è vuoto/nan, e contiene
+    almeno una cifra (i placeholder tipo 'novara', 'non prelev', 'novara non
+    prelev' sono parole senza cifre, spesso con spazi: vengono scartati)."""
+    if id_val is None:
+        return False
+    s = str(id_val).strip()
+    if not s or s.lower() in ("nan", "none", "null", ""):
+        return False
+    if any(ch.isspace() for ch in s):
+        return False
+    if not any(ch.isdigit() for ch in s):
+        return False
+    return True
+
+
 # ----------------------------------------------------------------------------
 # STATISTICA
 # ----------------------------------------------------------------------------
@@ -636,14 +652,47 @@ def main():
     # componenti_ambientali_1 e _2 vengono unite (contengono lo stesso set di
     # pazienti/colonne); se un id compare in entrambi si tiene una sola riga.
     raw_combined = pd.concat([cohort1, cohort2], ignore_index=True, sort=False)
+
+    # Alcune righe hanno un id NON plausibile (placeholder tipo "novara",
+    # "non prelev", spesso per pazienti senza campione genetico prelevato).
+    # Se non li scartiamo PRIMA della deduplica, pazienti diversi che
+    # condividono lo stesso placeholder come "id" collasserebbero in una
+    # sola riga, perdendo dati reali. Non avendo comunque un id valido non
+    # possono essere associati a nessuna corte genotipica, quindi vengono
+    # esclusi qui in modo esplicito e tracciato.
+    valid_mask = raw_combined[ID_COL].apply(is_plausible_patient_id)
+    n_invalid = (~valid_mask).sum()
+    if n_invalid > 0:
+        invalid_examples = sorted(raw_combined.loc[~valid_mask, ID_COL].astype(str).unique())[:10]
+        log.add(f"ATTENZIONE: {n_invalid} righe con id NON plausibile (placeholder, es. {invalid_examples}) "
+                 f"escluse PRIMA della deduplica per non farle collassare insieme; questi pazienti non "
+                 f"hanno comunque un id valido da associare a un file genotipico.")
+        raw_combined = raw_combined.loc[valid_mask].copy()
+
     n_before = raw_combined.shape[0]
+    dup_mask = raw_combined.duplicated(subset=ID_COL, keep=False)
+    if dup_mask.any():
+        compare_cols = [c for c in raw_combined.columns if c != ID_COL]
+        n_conflicting = 0
+        conflicting_examples = []
+        for idv, group in raw_combined.loc[dup_mask].groupby(ID_COL):
+            if group[compare_cols].drop_duplicates().shape[0] > 1:
+                n_conflicting += 1
+                if len(conflicting_examples) < 5:
+                    conflicting_examples.append(idv)
+        if n_conflicting > 0:
+            log.add(f"ATTENZIONE: {n_conflicting} id validi ma duplicati hanno righe con VALORI DISCORDANTI "
+                     f"(non solo copie identiche); viene tenuta la prima riga trovata, le altre scartate. "
+                     f"Esempi: {conflicting_examples}. Verifica se serve una regola di scelta diversa.")
+
     raw_combined = raw_combined.drop_duplicates(subset=ID_COL, keep="first")
     n_after = raw_combined.shape[0]
     if n_before != n_after:
-        log.add(f"Uniti componenti_ambientali_1 e _2: {n_before} righe -> {n_after} righe dopo deduplica su id "
-                 f"({n_before - n_after} duplicati rimossi)")
+        log.add(f"Uniti componenti_ambientali_1 e _2 (dopo scarto id non plausibili): {n_before} righe -> "
+                 f"{n_after} righe dopo deduplica su id ({n_before - n_after} duplicati rimossi)")
     else:
-        log.add(f"Uniti componenti_ambientali_1 e _2: {n_after} righe, nessun id duplicato trovato")
+        log.add(f"Uniti componenti_ambientali_1 e _2 (dopo scarto id non plausibili): {n_after} righe, "
+                 f"nessun id duplicato trovato")
 
     full = merge_side_file(raw_combined, fumo, "fumo", "dataset combinato", log)
     full = merge_side_file(full, scolarita, "scolarita", "dataset combinato", log)
