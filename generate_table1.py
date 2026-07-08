@@ -663,7 +663,7 @@ def main():
     valid_mask = raw_combined[ID_COL].apply(is_plausible_patient_id)
     n_invalid = (~valid_mask).sum()
     if n_invalid > 0:
-        invalid_examples = sorted(raw_combined.loc[~valid_mask, ID_COL].astype(str).unique())[:10]
+        invalid_examples = raw_combined.loc[~valid_mask, ID_COL].astype(str).unique().tolist()[:10]
         log.add(f"ATTENZIONE: {n_invalid} righe con id NON plausibile (placeholder, es. {invalid_examples}) "
                  f"escluse PRIMA della deduplica per non farle collassare insieme; questi pazienti non "
                  f"hanno comunque un id valido da associare a un file genotipico.")
