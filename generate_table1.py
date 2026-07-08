@@ -36,11 +36,11 @@ Logic:
 Usage:
     python generate_table1.py --input-dir . --output-dir output
 
-    # Use all 6 buffer distances for "seminativi" instead of the 1500m default:
-    python generate_table1.py --input-dir . --output-dir output --seminativi-buffers all
+    # Use all 6 buffer distances for seminativi/vigneti/risaie instead of the 1500m default:
+    python generate_table1.py --input-dir . --output-dir output --buffers all
 
-    # Use a custom subset of buffer distances for "seminativi":
-    python generate_table1.py --input-dir . --output-dir output --seminativi-buffers 500,1500
+    # Use a custom subset of buffer distances:
+    python generate_table1.py --input-dir . --output-dir output --buffers 500,1500
 
 Dependencies:
     pip install pandas scipy matplotlib python-docx --break-system-packages
@@ -119,11 +119,12 @@ BUFFER_VAR_PATTERN = re.compile(r"^(seminativi|vigneti|risaie)_(\d+)$")
 CODE_LIKE_PATTERN = re.compile(r"^[A-Za-z]{2,10}(-\d{2,6}){1,3}$")
 COLUMNS_TO_CLEAN_CODE_LIKE = ["parals_codals"]
 
-# Default buffer distances (meters) used for "seminativi" variables. Unlike
-# vigneti/risaie (which always use all 6 buffers), seminativi defaults to a
-# single representative distance to keep Table 1 and the figures focused.
-# Override with --seminativi-buffers (comma-separated list, or "all").
-DEFAULT_SEMINATIVI_BUFFERS = [1500]
+# Default buffer distance (meters) used for seminativi/vigneti/risaie
+# variables. Rather than including all 6 buffer distances for every
+# category, Table 1 and the figures default to a single representative
+# distance to stay focused. Override with --buffers (comma-separated list,
+# or "all" to use all 6 distances for all three categories).
+DEFAULT_BUFFERS = [1500]
 
 ALPHA = 0.05
 
@@ -187,7 +188,7 @@ def read_csv_robust(path, log):
 
 
 def parse_buffer_list(value):
-    """Parses --seminativi-buffers: 'all' -> None (no restriction), or a
+    """Parses --buffers: 'all' -> None (no restriction), or a
     comma-separated list of ints, e.g. '500,1500' -> [500, 1500]."""
     if value is None:
         return None
@@ -196,20 +197,17 @@ def parse_buffer_list(value):
     return sorted(int(x.strip()) for x in value.split(",") if x.strip())
 
 
-def detect_buffer_vars(df, seminativi_buffers=None):
+def detect_buffer_vars(df, allowed_buffers=None):
     """Returns the list of environmental columns seminativi/vigneti/risaie_<buffer>
     found in the dataframe, sorted by category and buffer distance.
-    seminativi_buffers: None = keep all seminativi buffers; otherwise a list
-    of allowed buffer distances (ints) restricting seminativi_* only
-    (vigneti/risaie are never restricted)."""
+    allowed_buffers: None = keep all buffer distances for all 3 categories;
+    otherwise a list of allowed buffer distances (ints) applied uniformly to
+    seminativi, vigneti AND risaie."""
     found = [c for c in df.columns if BUFFER_VAR_PATTERN.match(c)]
 
-    if seminativi_buffers is not None:
-        allowed = set(seminativi_buffers)
-        found = [
-            c for c in found
-            if not c.startswith("seminativi_") or int(c.split("_")[1]) in allowed
-        ]
+    if allowed_buffers is not None:
+        allowed = set(allowed_buffers)
+        found = [c for c in found if int(c.split("_")[1]) in allowed]
 
     def sort_key(c):
         m = BUFFER_VAR_PATTERN.match(c)
@@ -681,10 +679,10 @@ def main():
                          help="Genotype file whose ids define Cohort 1 (RES...)")
     parser.add_argument("--gen2-ids-file", default=GEN2_IDS_FILE_DEFAULT,
                          help="Genotype file whose ids define Cohort 2 (ACH...)")
-    parser.add_argument("--seminativi-buffers", default="1500",
-                         help="Comma-separated buffer distances (meters) to use for 'seminativi' "
-                              "variables, or 'all' for all 6 buffers. Default: 1500. "
-                              "vigneti/risaie always use all 6 buffers.")
+    parser.add_argument("--buffers", default="1500",
+                         help="Comma-separated buffer distances (meters) to use for "
+                              "seminativi/vigneti/risaie variables, or 'all' for all 6 buffers. "
+                              "Default: 1500 (applied to all three categories).")
     args = parser.parse_args()
 
     out_dir = args.output_dir
@@ -692,14 +690,15 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     os.makedirs(img_dir, exist_ok=True)
 
-    seminativi_buffers = parse_buffer_list(args.seminativi_buffers)
+    allowed_buffers = parse_buffer_list(args.buffers)
 
     log = RunLog()
     log.add("Starting Table 1 generation")
-    if seminativi_buffers is None:
-        log.add("seminativi buffers: ALL (6 distances)")
+    if allowed_buffers is None:
+        log.add("Buffer distances: ALL (6 distances) for seminativi, vigneti and risaie")
     else:
-        log.add(f"seminativi buffers: {seminativi_buffers} (use --seminativi-buffers all for all 6)")
+        log.add(f"Buffer distances: {allowed_buffers} for seminativi, vigneti and risaie "
+                 f"(use --buffers all for all 6)")
 
     cohort1 = read_csv_robust(os.path.join(args.input_dir, COHORT1_FILE), log)
     cohort2 = read_csv_robust(os.path.join(args.input_dir, COHORT2_FILE), log)
@@ -790,7 +789,7 @@ def main():
 
     full = clean_code_like_values(full, COLUMNS_TO_CLEAN_CODE_LIKE, log)
 
-    buffer_vars = detect_buffer_vars(full, seminativi_buffers=seminativi_buffers)
+    buffer_vars = detect_buffer_vars(full, allowed_buffers=allowed_buffers)
     continuous_vars = [v for v in BASE_CONTINUOUS_VARS if v in full.columns]
     if "education_years" in full.columns:
         continuous_vars.append("education_years")
@@ -828,8 +827,8 @@ def main():
             appendix_images.append((p, f"Distribution of {var} by cohort"))
 
     for category in ["seminativi", "vigneti", "risaie"]:
-        if category == "seminativi" and seminativi_buffers is not None:
-            cat_buffer_cols = [f"seminativi_{b}" for b in seminativi_buffers if f"seminativi_{b}" in full.columns]
+        if allowed_buffers is not None:
+            cat_buffer_cols = [f"{category}_{b}" for b in allowed_buffers if f"{category}_{b}" in full.columns]
         else:
             cat_buffer_cols = [c for c in full.columns if c.startswith(category + "_")]
 
