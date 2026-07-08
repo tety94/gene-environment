@@ -4,32 +4,45 @@
 generate_table1.py
 ===================
 
-Genera la "Tabella 1" di un paper (confronto Corte 1 vs Corte 2) a partire da:
+Generates paper "Table 1" (Cohort 1 vs Cohort 2 comparison) from:
 
-  - componenti_ambientali_1.csv   -> dati corte 1 (demografia + variabili ambientali)
-  - componenti_ambientali_2.csv   -> dati corte 2 (demografia + variabili ambientali)
-  - componenti_ambientali_fumo.csv        -> fumo_boolean (id comuni a corte 1 e 2)
-  - componenti_ambientali_scolarita.csv   -> education_level / education_years (id comuni)
+  - componenti_ambientali_1.csv   -> cohort 1 data (demographics + environmental variables)
+  - componenti_ambientali_2.csv   -> cohort 2 data (demographics + environmental variables)
+  - componenti_ambientali_fumo.csv        -> fumo_boolean (ids shared by cohort 1 and 2)
+  - componenti_ambientali_scolarita.csv   -> education_level / education_years (shared ids)
 
-Logica:
-  1. Ogni corte viene arricchita (LEFT JOIN su "id") con le colonne *nuove*
-     presenti nei file fumo/scolarita (le colonne demografiche duplicate come
-     sex/onset_site/onset_age/diagnostic_delay vengono ignorate in fase di
-     join per evitare conflitti, ma vengono controllate per coerenza).
-  2. Le due corti arricchite vengono etichettate (Corte 1 / Corte 2) e concatenate.
-  3. Per ogni variabile:
-       - CONTINUA  -> mediana [IQR], test di Mann-Whitney U
-       - CATEGORICA -> n (%), test Chi-quadro (o Fisher esatto se atteso <5)
-  4. Output in cartella "output/":
+Logic:
+  1. componenti_ambientali_1.csv and _2.csv are concatenated and de-duplicated
+     on "id" (rows with an implausible id, e.g. free-text placeholders like
+     "novara" or "not collected", are discarded BEFORE de-duplication so they
+     don't collapse different patients into a single row).
+  2. Real cohort membership (Cohort 1 / Cohort 2) is derived from which of the
+     two genotype files an id (doubled: "id_id") appears in, NOT from any
+     column inside the environmental files. If an id appears in both genotype
+     files, Cohort 1 wins.
+  3. Each cohort is enriched (LEFT JOIN on "id") with the *new* columns found
+     in the fumo/scolarita files (duplicated demographic columns such as
+     sex/onset_site/onset_age/diagnostic_delay are not re-imported, but are
+     checked for consistency and logged if discordant).
+  4. For each variable:
+       - CONTINUOUS  -> median [IQR], Mann-Whitney U test
+       - CATEGORICAL -> n (%), Chi-square test (or Fisher's exact if expected <5)
+  5. Output in the "output/" folder:
        - table1.csv
-       - table1.docx      (tabella pronta per il paper)
-       - images/*.png     (boxplot, grafici a barre, trend p-value sui buffer)
-       - run_log.txt       (log di join, missing, warning)
+       - table1.docx      (ready-to-use table for the paper, with figures in appendix)
+       - images/*.png     (boxplots, bar charts, buffer-distance p-value trend)
+       - run_log.txt      (join/merge log, missing data, warnings)
 
-Uso:
+Usage:
     python generate_table1.py --input-dir . --output-dir output
 
-Dipendenze:
+    # Use all 6 buffer distances for "seminativi" instead of the 1500m default:
+    python generate_table1.py --input-dir . --output-dir output --seminativi-buffers all
+
+    # Use a custom subset of buffer distances for "seminativi":
+    python generate_table1.py --input-dir . --output-dir output --seminativi-buffers 500,1500
+
+Dependencies:
     pip install pandas scipy matplotlib python-docx --break-system-packages
 """
 
@@ -68,51 +81,59 @@ SCOLARITA_FILE = "componenti_ambientali_scolarita.csv"
 
 ID_COL = "id"
 
-# File genotipici che definiscono l'appartenenza reale alle due corti
-# (l'id in componenti_ambientali_1/2.csv corrisponde ESATTAMENTE, con
-# duplicazione, all'id in questi file: es. "RES02977_RES02977").
-# Corte 1 = id presenti nel file gen1 (RES...), Corte 2 = id presenti nel file
-# gen2 (ACH...). Se un id compare in entrambi, vince Corte 1.
+# Genotype files that define REAL cohort membership (the id in
+# componenti_ambientali_1/2.csv matches EXACTLY, doubled, the id in these
+# files: e.g. "RES02977_RES02977"). Cohort 1 = ids found in the gen1 file
+# (RES...), Cohort 2 = ids found in the gen2 file (ACH...). If an id is found
+# in both, Cohort 1 wins.
 GEN1_IDS_FILE_DEFAULT = "/mnt/cresla_prod/genome_datasets/merged_csv/full_chr_gen1_test1.csv"
 GEN2_IDS_FILE_DEFAULT = "/srv/python-projects/gene-environment/output_combined_risaie.csv"
 
-# Colonna calcolata usata per il confronto in Tabella 1 ("Corte 1"/"Corte 2"),
-# derivata dall'appartenenza ai file genotipici sopra, NON da parals_codals
-# (che è solo un'etichetta arbitraria e viene trattata come normale variabile
-# categorica descrittiva).
-GROUP_COL = "corte"
+# Computed column used for the Table 1 comparison ("Cohort 1"/"Cohort 2"),
+# derived from genotype-file membership above, NOT from parals_codals (which
+# is just an arbitrary/id-like label and is treated as a regular descriptive
+# categorical variable).
+GROUP_COL = "cohort"
+GROUP1_LABEL = "Cohort 1"
+GROUP2_LABEL = "Cohort 2"
 
-# Variabili demografiche/cliniche continue attese nei file corte (se presenti)
+# Continuous demographic/clinical variables expected in the cohort files (if present)
 BASE_CONTINUOUS_VARS = ["onset_age", "diagnostic_delay", "survival"]
 
-# Variabili demografiche/cliniche categoriche attese nei file corte (se presenti)
+# Categorical demographic/clinical variables expected in the cohort files (if present)
 BASE_CATEGORICAL_VARS = ["sex", "onset_site", "parals_codals"]
 
-# Colonne "demografiche" duplicate nei file fumo/scolarita: NON vengono importate
-# in join (si tiene la versione presente nel file di corte), ma vengono
-# confrontate per coerenza e loggate se discordanti.
+# "Demographic" columns duplicated in the fumo/scolarita files: NOT imported
+# during the join (the cohort-file version is kept), but compared for
+# consistency and logged if discordant.
 DEMOGRAPHIC_OVERLAP_COLS = ["sex", "onset_site", "onset_age", "diagnostic_delay"]
 
-# Pattern per individuare automaticamente le variabili ambientali (6 buffer x 3 categorie)
+# Pattern to auto-detect environmental variables (6 buffers x 3 categories)
 BUFFER_VAR_PATTERN = re.compile(r"^(seminativi|vigneti|risaie)_(\d+)$")
 
-# Alcune colonne categoriche (es. parals_codals) possono contenere valori "codice"
-# residui (es. "COD-0001", "RES00123") che non sono vere categorie ma id/codici
-# finiti per errore nella colonna. Questi valori vengono trattati come mancanti
-# (NaN) solo per quella variabile specifica, senza escludere il paziente
-# dall'analisi delle altre variabili.
+# Some categorical columns (e.g. parals_codals) can contain leftover
+# "code" values (e.g. "COD-0001", "PAR-2008-056") that are not real
+# categories but ids/codes that ended up in the column by mistake. These
+# values are treated as missing (NaN) for that specific variable only,
+# without excluding the patient from the analysis of other variables.
 CODE_LIKE_PATTERN = re.compile(r"^[A-Za-z]{2,10}(-\d{2,6}){1,3}$")
 COLUMNS_TO_CLEAN_CODE_LIKE = ["parals_codals"]
+
+# Default buffer distances (meters) used for "seminativi" variables. Unlike
+# vigneti/risaie (which always use all 6 buffers), seminativi defaults to a
+# single representative distance to keep Table 1 and the figures focused.
+# Override with --seminativi-buffers (comma-separated list, or "all").
+DEFAULT_SEMINATIVI_BUFFERS = [1500]
 
 ALPHA = 0.05
 
 
 def load_ids_from_genotype_file(path, log, label):
-    """Legge SOLO il primo campo (id) di ogni riga di un file genotipico,
-    senza parsare le migliaia di colonne SNP successive. Efficiente anche su
-    file molto grandi perché si ferma alla prima virgola di ogni riga."""
+    """Reads ONLY the first field (id) of every line in a genotype file,
+    without parsing the thousands of following SNP columns. Efficient even
+    on very large files because it stops at the first comma of each line."""
     if not os.path.exists(path):
-        log.add(f"ERRORE: file genotipico non trovato per {label} -> {path}")
+        log.add(f"ERROR: genotype file not found for {label} -> {path}")
         return set()
     ids = set()
     n_lines = 0
@@ -124,7 +145,7 @@ def load_ids_from_genotype_file(path, log, label):
             id_val = line[:comma_idx].strip() if comma_idx != -1 else line.strip()
             if id_val:
                 ids.add(id_val)
-    log.add(f"File genotipico {label} ({path}): {n_lines} righe, {len(ids)} id unici")
+    log.add(f"Genotype file {label} ({path}): {n_lines} rows, {len(ids)} unique ids")
     return ids
 
 
@@ -133,7 +154,7 @@ def load_ids_from_genotype_file(path, log, label):
 # ----------------------------------------------------------------------------
 
 class RunLog:
-    """Colleziona messaggi da scrivere poi su run_log.txt"""
+    """Collects messages to be written later to run_log.txt"""
 
     def __init__(self):
         self.lines = []
@@ -150,25 +171,45 @@ class RunLog:
 
 
 def read_csv_robust(path, log):
-    """Legge un csv gestendo automaticamente virgolette e incoraggiando
-    la conversione numerica delle colonne che lo consentono."""
+    """Reads a csv handling quoting automatically and preparing numeric
+    columns for downstream conversion."""
     if not os.path.exists(path):
-        log.add(f"ERRORE: file non trovato -> {path}")
+        log.add(f"ERROR: file not found -> {path}")
         return None
     df = pd.read_csv(path, sep=",", quotechar='"', skipinitialspace=True)
     df.columns = [c.strip().strip('"') for c in df.columns]
     if ID_COL not in df.columns:
-        log.add(f"ATTENZIONE: colonna '{ID_COL}' non trovata in {path} (colonne: {list(df.columns)})")
+        log.add(f"WARNING: column '{ID_COL}' not found in {path} (columns: {list(df.columns)})")
     else:
         df[ID_COL] = df[ID_COL].astype(str).str.strip()
-    log.add(f"Letto {path}: {df.shape[0]} righe, {df.shape[1]} colonne")
+    log.add(f"Read {path}: {df.shape[0]} rows, {df.shape[1]} columns")
     return df
 
 
-def detect_buffer_vars(df):
-    """Ritorna la lista delle colonne ambientali seminativi/vigneti/risaie_<buffer>
-    trovate nel dataframe, ordinate per categoria e per distanza buffer."""
+def parse_buffer_list(value):
+    """Parses --seminativi-buffers: 'all' -> None (no restriction), or a
+    comma-separated list of ints, e.g. '500,1500' -> [500, 1500]."""
+    if value is None:
+        return None
+    if value.strip().lower() == "all":
+        return None
+    return sorted(int(x.strip()) for x in value.split(",") if x.strip())
+
+
+def detect_buffer_vars(df, seminativi_buffers=None):
+    """Returns the list of environmental columns seminativi/vigneti/risaie_<buffer>
+    found in the dataframe, sorted by category and buffer distance.
+    seminativi_buffers: None = keep all seminativi buffers; otherwise a list
+    of allowed buffer distances (ints) restricting seminativi_* only
+    (vigneti/risaie are never restricted)."""
     found = [c for c in df.columns if BUFFER_VAR_PATTERN.match(c)]
+
+    if seminativi_buffers is not None:
+        allowed = set(seminativi_buffers)
+        found = [
+            c for c in found
+            if not c.startswith("seminativi_") or int(c.split("_")[1]) in allowed
+        ]
 
     def sort_key(c):
         m = BUFFER_VAR_PATTERN.match(c)
@@ -178,32 +219,32 @@ def detect_buffer_vars(df):
 
 
 def check_demographic_consistency(cohort_df, side_df, side_name, cohort_name, log):
-    """Confronta le colonne demografiche in comune (per stesso id) fra il file
-    di corte e il file fumo/scolarita, e logga eventuali discrepanze."""
+    """Compares shared demographic columns (matched by id) between the cohort
+    file and the fumo/scolarita file, and logs any discrepancies."""
     common_cols = [c for c in DEMOGRAPHIC_OVERLAP_COLS if c in cohort_df.columns and c in side_df.columns]
     if not common_cols:
         return
     merged = cohort_df[[ID_COL] + common_cols].merge(
-        side_df[[ID_COL] + common_cols], on=ID_COL, how="inner", suffixes=("_corte", f"_{side_name}")
+        side_df[[ID_COL] + common_cols], on=ID_COL, how="inner", suffixes=("_cohort", f"_{side_name}")
     )
     n_mismatch_total = 0
     for col in common_cols:
-        c1 = merged[f"{col}_corte"]
+        c1 = merged[f"{col}_cohort"]
         c2 = merged[f"{col}_{side_name}"]
         mismatch = merged[(c1.astype(str) != c2.astype(str)) & c1.notna() & c2.notna()]
         if len(mismatch) > 0:
             n_mismatch_total += len(mismatch)
             log.add(
-                f"ATTENZIONE [{cohort_name} vs {side_name}]: {len(mismatch)} id con valori "
-                f"discordanti per '{col}' (mantenuto il valore del file di corte)."
+                f"WARNING [{cohort_name} vs {side_name}]: {len(mismatch)} ids with discordant "
+                f"values for '{col}' (cohort-file value kept)."
             )
     if n_mismatch_total == 0:
-        log.add(f"OK: nessuna discrepanza demografica fra {cohort_name} e {side_name} sulle colonne {common_cols}")
+        log.add(f"OK: no demographic discrepancy between {cohort_name} and {side_name} on columns {common_cols}")
 
 
 def merge_side_file(cohort_df, side_df, side_name, cohort_name, log):
-    """Left-join di cohort_df con le sole colonne NUOVE presenti in side_df
-    (tutto tranne l'id e le colonne demografiche già presenti in cohort_df)."""
+    """Left-join of cohort_df with only the NEW columns present in side_df
+    (everything except id and demographic columns already in cohort_df)."""
     if side_df is None:
         return cohort_df
 
@@ -211,7 +252,7 @@ def merge_side_file(cohort_df, side_df, side_name, cohort_name, log):
 
     new_cols = [c for c in side_df.columns if c not in cohort_df.columns and c != ID_COL]
     if not new_cols:
-        log.add(f"ATTENZIONE: nessuna colonna nuova da importare da {side_name} in {cohort_name}")
+        log.add(f"WARNING: no new column to import from {side_name} into {cohort_name}")
         return cohort_df
 
     slim = side_df[[ID_COL] + new_cols].drop_duplicates(subset=ID_COL)
@@ -219,15 +260,15 @@ def merge_side_file(cohort_df, side_df, side_name, cohort_name, log):
     merged = cohort_df.merge(slim, on=ID_COL, how="left")
     n_missing = merged[new_cols[0]].isna().sum()
     log.add(
-        f"Join {cohort_name} + {side_name}: {before} righe -> {merged.shape[0]} righe; "
-        f"colonne aggiunte: {new_cols}; id senza corrispondenza in {side_name}: {n_missing}"
+        f"Join {cohort_name} + {side_name}: {before} rows -> {merged.shape[0]} rows; "
+        f"columns added: {new_cols}; ids with no match in {side_name}: {n_missing}"
     )
     return merged
 
 
 def clean_code_like_values(df, columns, log):
-    """Sostituisce con NaN i valori che sembrano codici/id (es. 'COD-0001')
-    invece di vere categorie, nelle colonne indicate."""
+    """Replaces with NaN values that look like codes/ids (e.g. 'COD-0001',
+    'PAR-2008-056') instead of real categories, in the given columns."""
     for col in columns:
         if col not in df.columns:
             continue
@@ -235,18 +276,19 @@ def clean_code_like_values(df, columns, log):
         mask = s.str.match(CODE_LIKE_PATTERN, na=False)
         n_bad = mask.sum()
         if n_bad > 0:
-            examples = sorted(df.loc[mask, col].astype(str).unique())[:5]
-            log.add(f"Pulizia '{col}': {n_bad} valori tipo-codice trattati come mancanti "
-                     f"(esempi: {examples}); categorie valide rimaste: "
-                     f"{sorted(df.loc[~mask, col].dropna().astype(str).unique())}")
+            examples = df.loc[mask, col].astype(str).unique().tolist()[:5]
+            remaining = df.loc[~mask, col].dropna().astype(str).unique().tolist()
+            log.add(f"Cleaning '{col}': {n_bad} code-like values treated as missing "
+                     f"(examples: {examples}); remaining valid categories: {remaining}")
             df.loc[mask, col] = np.nan
     return df
 
 
 def is_plausible_patient_id(id_val):
-    """Un id paziente plausibile non ha spazi, non è vuoto/nan, e contiene
-    almeno una cifra (i placeholder tipo 'novara', 'non prelev', 'novara non
-    prelev' sono parole senza cifre, spesso con spazi: vengono scartati)."""
+    """A plausible patient id has no whitespace, is not empty/nan, and
+    contains at least one digit (placeholders like 'novara', 'not collected',
+    'novara not collected' are words with no digits, often with spaces, and
+    are discarded)."""
     if id_val is None:
         return False
     s = str(id_val).strip()
@@ -260,12 +302,12 @@ def is_plausible_patient_id(id_val):
 
 
 # ----------------------------------------------------------------------------
-# STATISTICA
+# STATISTICS
 # ----------------------------------------------------------------------------
 
 def fmt_p(p):
     if p is None or (isinstance(p, float) and np.isnan(p)):
-        return "n.d."
+        return "n/a"
     if p < 0.001:
         return "<0.001"
     return f"{p:.3f}"
@@ -303,53 +345,53 @@ def chi2_or_fisher_p(df, var, group_col):
     ct = pd.crosstab(df[var], df[group_col])
     ct = ct.loc[:, (ct.sum(axis=0) > 0)]
     if ct.shape[0] < 2 or ct.shape[1] < 2:
-        return "n.d.", np.nan
+        return "n/a", np.nan
     try:
         chi2, p, dof, expected = chi2_contingency(ct, correction=False)
     except ValueError:
-        return "n.d.", np.nan
+        return "n/a", np.nan
     if ct.shape == (2, 2):
         if (expected < 5).any():
             try:
                 _, p = fisher_exact(ct.values)
-                return "Fisher esatto", p
+                return "Fisher's exact", p
             except ValueError:
-                return "n.d.", np.nan
-        return "Chi-quadro", p
-    test_name = "Chi-quadro"
+                return "n/a", np.nan
+        return "Chi-square", p
+    test_name = "Chi-square"
     if (expected < 5).sum() > 0:
-        test_name = "Chi-quadro (attenzione: celle attese <5)"
+        test_name = "Chi-square (warning: some expected cells <5)"
     return test_name, p
 
 
 # ----------------------------------------------------------------------------
-# COSTRUZIONE TABELLA 1
+# TABLE 1 CONSTRUCTION
 # ----------------------------------------------------------------------------
 
 def build_table1(df, group_col, continuous_vars, categorical_vars, log):
-    """Ritorna una lista di dict, una riga per ogni riga di tabella
-    (header di variabile + eventuali sotto-righe categoria)."""
+    """Returns a list of dicts, one per table row (variable header + any
+    category sub-rows)."""
     groups = sorted(df[group_col].dropna().unique())
     if len(groups) != 2:
-        log.add(f"ATTENZIONE: attesi 2 gruppi in '{group_col}', trovati: {groups}")
+        log.add(f"WARNING: expected 2 groups in '{group_col}', found: {groups}")
     g1, g2 = groups[0], groups[1]
 
     rows = []
     n1_tot = (df[group_col] == g1).sum()
     n2_tot = (df[group_col] == g2).sum()
     rows.append({
-        "Variabile": "N totale, n",
-        "Categoria": "",
+        "Variable": "Total N, n",
+        "Category": "",
         f"{g1}": f"{n1_tot}",
         f"{g2}": f"{n2_tot}",
         "p-value": "",
         "Test": "",
-        "significativo": False,
+        "significant": False,
     })
 
     for var in continuous_vars:
         if var not in df.columns:
-            log.add(f"ATTENZIONE: variabile continua '{var}' non presente, saltata")
+            log.add(f"WARNING: continuous variable '{var}' not present, skipped")
             continue
         s1 = df.loc[df[group_col] == g1, var]
         s2 = df.loc[df[group_col] == g2, var]
@@ -357,31 +399,31 @@ def build_table1(df, group_col, continuous_vars, categorical_vars, log):
         summ2, n2 = continuous_summary(s2)
         p = mannwhitney_p(s1, s2)
         rows.append({
-            "Variabile": f"{var}, mediana [IQR]",
-            "Categoria": "",
+            "Variable": f"{var}, median [IQR]",
+            "Category": "",
             f"{g1}": f"{summ1} (n={n1})",
             f"{g2}": f"{summ2} (n={n2})",
             "p-value": fmt_p(p),
             "Test": "Mann-Whitney U",
-            "significativo": (p is not None and not np.isnan(p) and p < ALPHA),
+            "significant": (p is not None and not np.isnan(p) and p < ALPHA),
         })
 
     for var in categorical_vars:
         if var not in df.columns:
-            log.add(f"ATTENZIONE: variabile categorica '{var}' non presente, saltata")
+            log.add(f"WARNING: categorical variable '{var}' not present, skipped")
             continue
         c1, tot1 = categorical_counts(df.loc[df[group_col] == g1, var])
         c2, tot2 = categorical_counts(df.loc[df[group_col] == g2, var])
         test_name, p = chi2_or_fisher_p(df, var, group_col)
         sig = (p is not None and not np.isnan(p) and p < ALPHA)
         rows.append({
-            "Variabile": f"{var}, n (%)",
-            "Categoria": "",
+            "Variable": f"{var}, n (%)",
+            "Category": "",
             f"{g1}": f"n={tot1}",
             f"{g2}": f"n={tot2}",
             "p-value": fmt_p(p),
             "Test": test_name,
-            "significativo": sig,
+            "significant": sig,
         })
         categories = sorted(set(c1.index.tolist()) | set(c2.index.tolist()), key=lambda x: str(x))
         for cat in categories:
@@ -390,32 +432,32 @@ def build_table1(df, group_col, continuous_vars, categorical_vars, log):
             pct1 = (n1 / tot1 * 100) if tot1 else 0
             pct2 = (n2 / tot2 * 100) if tot2 else 0
             rows.append({
-                "Variabile": "",
-                "Categoria": f"   {cat}",
+                "Variable": "",
+                "Category": f"   {cat}",
                 f"{g1}": f"{n1} ({pct1:.1f}%)",
                 f"{g2}": f"{n2} ({pct2:.1f}%)",
                 "p-value": "",
                 "Test": "",
-                "significativo": False,
+                "significant": False,
             })
 
     return rows, g1, g2
 
 
 # ----------------------------------------------------------------------------
-# EXPORT CSV
+# CSV EXPORT
 # ----------------------------------------------------------------------------
 
 def save_table1_csv(rows, g1, g2, path):
     df_out = pd.DataFrame(rows)
-    cols = ["Variabile", "Categoria", str(g1), str(g2), "p-value", "Test"]
+    cols = ["Variable", "Category", str(g1), str(g2), "p-value", "Test"]
     cols = [c for c in cols if c in df_out.columns]
     df_out = df_out[cols]
     df_out.to_csv(path, index=False, encoding="utf-8-sig")
 
 
 # ----------------------------------------------------------------------------
-# EXPORT DOCX
+# DOCX EXPORT
 # ----------------------------------------------------------------------------
 
 def _set_cell_shading(cell, color_hex):
@@ -427,20 +469,20 @@ def _set_cell_shading(cell, color_hex):
 def save_table1_docx(rows, g1, g2, path, images_for_appendix=None):
     doc = Document()
 
-    title = doc.add_heading("Tabella 1. Caratteristiche demografiche, cliniche e ambientali "
-                             "per corte di studio", level=1)
+    title = doc.add_heading("Table 1. Demographic, clinical and environmental characteristics "
+                             "by study cohort", level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     subtitle = doc.add_paragraph()
     run = subtitle.add_run(
-        f"Confronto {g1} vs {g2}. Variabili continue: mediana [IQR], test di Mann-Whitney U. "
-        f"Variabili categoriche: n (%), test Chi-quadro o Fisher esatto (celle attese <5). "
-        f"p < {ALPHA} evidenziato in grassetto."
+        f"Comparison {g1} vs {g2}. Continuous variables: median [IQR], Mann-Whitney U test. "
+        f"Categorical variables: n (%), Chi-square or Fisher's exact test (expected cells <5). "
+        f"p < {ALPHA} highlighted in bold."
     )
     run.italic = True
     run.font.size = Pt(9)
 
-    headers = ["Variabile", str(g1), str(g2), "p-value", "Test"]
+    headers = ["Variable", str(g1), str(g2), "p-value", "Test"]
     table = doc.add_table(rows=1, cols=len(headers))
     table.style = "Light Grid Accent 1"
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -455,16 +497,16 @@ def save_table1_docx(rows, g1, g2, path, images_for_appendix=None):
 
     for row in rows:
         cells = table.add_row().cells
-        var_label = row["Variabile"] if row["Variabile"] else row["Categoria"]
+        var_label = row["Variable"] if row["Variable"] else row["Category"]
         values = [var_label, row.get(str(g1), ""), row.get(str(g2), ""), row["p-value"], row["Test"]]
         for i, v in enumerate(values):
             cells[i].text = str(v)
-            if row.get("significativo") and i == 3:
+            if row.get("significant") and i == 3:
                 for p in cells[i].paragraphs:
                     for r in p.runs:
                         r.bold = True
                         r.font.color.rgb = RGBColor(0xC0, 0x00, 0x00)
-            if not row["Variabile"] and row["Categoria"] and i == 0:
+            if not row["Variable"] and row["Category"] and i == 0:
                 for p in cells[i].paragraphs:
                     for r in p.runs:
                         r.italic = True
@@ -475,7 +517,7 @@ def save_table1_docx(rows, g1, g2, path, images_for_appendix=None):
 
     if images_for_appendix:
         doc.add_page_break()
-        doc.add_heading("Appendice - Figure", level=1)
+        doc.add_heading("Appendix - Figures", level=1)
         for img_path, caption in images_for_appendix:
             if os.path.exists(img_path):
                 doc.add_picture(img_path, width=Inches(6))
@@ -489,7 +531,7 @@ def save_table1_docx(rows, g1, g2, path, images_for_appendix=None):
 
 
 # ----------------------------------------------------------------------------
-# IMMAGINI
+# FIGURES
 # ----------------------------------------------------------------------------
 
 def plot_continuous_box(df, var, group_col, g1, g2, out_path, log):
@@ -515,13 +557,19 @@ def plot_continuous_box(df, var, group_col, g1, g2, out_path, log):
     return out_path
 
 
-def plot_buffer_grouped_box(df, category, group_col, g1, g2, out_dir, log):
-    """category in {'seminativi','vigneti','risaie'}: boxplot raggruppato per
-    distanza buffer, affiancando corte1 e corte2."""
-    buffer_cols = sorted(
-        [c for c in df.columns if c.startswith(category + "_")],
-        key=lambda c: int(c.split("_")[1]),
-    )
+def plot_buffer_grouped_box(df, category, group_col, g1, g2, out_dir, log, buffer_cols=None):
+    """category in {'seminativi','vigneti','risaie'}: boxplot grouped by
+    buffer distance, side-by-side cohort1/cohort2. If buffer_cols is given,
+    only those columns are plotted (used to respect --seminativi-buffers);
+    otherwise all matching columns in df are auto-detected."""
+    if buffer_cols is None:
+        buffer_cols = sorted(
+            [c for c in df.columns if c.startswith(category + "_")],
+            key=lambda c: int(c.split("_")[1]),
+        )
+    else:
+        buffer_cols = sorted(buffer_cols, key=lambda c: int(c.split("_")[1]))
+
     if not buffer_cols:
         return None
     distances = [c.split("_")[1] for c in buffer_cols]
@@ -549,9 +597,9 @@ def plot_buffer_grouped_box(df, category, group_col, g1, g2, out_dir, log):
 
     ax.set_xticks(range(len(buffer_cols)))
     ax.set_xticklabels([f"{d}m" for d in distances])
-    ax.set_xlabel("Buffer (metri)")
-    ax.set_ylabel(f"{category} (valore)")
-    ax.set_title(f"{category}: confronto {g1} vs {g2} per buffer")
+    ax.set_xlabel("Buffer (meters)")
+    ax.set_ylabel(f"{category} (value)")
+    ax.set_title(f"{category}: {g1} vs {g2} comparison by buffer")
     ax.legend([bp1["boxes"][0], bp2["boxes"][0]], [str(g1), str(g2)], loc="best")
     fig.tight_layout()
     out_path = os.path.join(out_dir, f"boxplot_{category}_per_buffer.png")
@@ -560,11 +608,15 @@ def plot_buffer_grouped_box(df, category, group_col, g1, g2, out_dir, log):
     return out_path
 
 
-def plot_buffer_pvalue_trend(df, category, group_col, g1, g2, out_dir, log):
-    buffer_cols = sorted(
-        [c for c in df.columns if c.startswith(category + "_")],
-        key=lambda c: int(c.split("_")[1]),
-    )
+def plot_buffer_pvalue_trend(df, category, group_col, g1, g2, out_dir, log, buffer_cols=None):
+    if buffer_cols is None:
+        buffer_cols = sorted(
+            [c for c in df.columns if c.startswith(category + "_")],
+            key=lambda c: int(c.split("_")[1]),
+        )
+    else:
+        buffer_cols = sorted(buffer_cols, key=lambda c: int(c.split("_")[1]))
+
     if not buffer_cols:
         return None
     distances, pvals = [], []
@@ -577,10 +629,10 @@ def plot_buffer_pvalue_trend(df, category, group_col, g1, g2, out_dir, log):
 
     fig, ax = plt.subplots(figsize=(6, 4.5))
     ax.plot(distances, pvals, marker="o", color="#4C72B0")
-    ax.axhline(ALPHA, color="red", linestyle="--", linewidth=1, label=f"soglia p={ALPHA}")
-    ax.set_xlabel("Buffer (metri)")
+    ax.axhline(ALPHA, color="red", linestyle="--", linewidth=1, label=f"threshold p={ALPHA}")
+    ax.set_xlabel("Buffer (meters)")
     ax.set_ylabel("p-value (Mann-Whitney U)")
-    ax.set_title(f"{category}: andamento del p-value al variare del buffer")
+    ax.set_title(f"{category}: p-value trend across buffer distances")
     ax.legend()
     fig.tight_layout()
     out_path = os.path.join(out_dir, f"pvalue_trend_{category}.png")
@@ -607,8 +659,8 @@ def plot_categorical_bar(df, var, group_col, g1, g2, out_dir, log):
     ax.bar(x + width / 2, pct2, width, label=str(g2), color="#DD8452", alpha=0.8)
     ax.set_xticks(x)
     ax.set_xticklabels([str(c) for c in categories], rotation=0)
-    ax.set_ylabel("% entro la corte")
-    ax.set_title(f"{var}: distribuzione per corte")
+    ax.set_ylabel("% within cohort")
+    ax.set_title(f"{var}: distribution by cohort")
     ax.legend()
     fig.tight_layout()
     out_path = os.path.join(out_dir, f"barplot_{var}.png")
@@ -622,13 +674,17 @@ def plot_categorical_bar(df, var, group_col, g1, g2, out_dir, log):
 # ----------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Genera Tabella 1 (Corte 1 vs Corte 2) con test statistici e figure")
-    parser.add_argument("--input-dir", default=".", help="Cartella con i 4 csv ambientali/demografici in input")
-    parser.add_argument("--output-dir", default="output", help="Cartella di output")
+    parser = argparse.ArgumentParser(description="Generate Table 1 (Cohort 1 vs Cohort 2) with statistical tests and figures")
+    parser.add_argument("--input-dir", default=".", help="Folder containing the 4 environmental/demographic input csv files")
+    parser.add_argument("--output-dir", default="output", help="Output folder")
     parser.add_argument("--gen1-ids-file", default=GEN1_IDS_FILE_DEFAULT,
-                         help="File genotipico i cui id definiscono la Corte 1 (RES...)")
+                         help="Genotype file whose ids define Cohort 1 (RES...)")
     parser.add_argument("--gen2-ids-file", default=GEN2_IDS_FILE_DEFAULT,
-                         help="File genotipico i cui id definiscono la Corte 2 (ACH...)")
+                         help="Genotype file whose ids define Cohort 2 (ACH...)")
+    parser.add_argument("--seminativi-buffers", default="1500",
+                         help="Comma-separated buffer distances (meters) to use for 'seminativi' "
+                              "variables, or 'all' for all 6 buffers. Default: 1500. "
+                              "vigneti/risaie always use all 6 buffers.")
     args = parser.parse_args()
 
     out_dir = args.output_dir
@@ -636,8 +692,14 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     os.makedirs(img_dir, exist_ok=True)
 
+    seminativi_buffers = parse_buffer_list(args.seminativi_buffers)
+
     log = RunLog()
-    log.add("Avvio generazione Tabella 1")
+    log.add("Starting Table 1 generation")
+    if seminativi_buffers is None:
+        log.add("seminativi buffers: ALL (6 distances)")
+    else:
+        log.add(f"seminativi buffers: {seminativi_buffers} (use --seminativi-buffers all for all 6)")
 
     cohort1 = read_csv_robust(os.path.join(args.input_dir, COHORT1_FILE), log)
     cohort2 = read_csv_robust(os.path.join(args.input_dir, COHORT2_FILE), log)
@@ -645,28 +707,28 @@ def main():
     scolarita = read_csv_robust(os.path.join(args.input_dir, SCOLARITA_FILE), log)
 
     if cohort1 is None or cohort2 is None:
-        log.add("ERRORE FATALE: mancano i file delle corti, impossibile proseguire")
+        log.add("FATAL ERROR: cohort files missing, cannot proceed")
         log.save(os.path.join(out_dir, "run_log.txt"))
         sys.exit(1)
 
-    # componenti_ambientali_1 e _2 vengono unite (contengono lo stesso set di
-    # pazienti/colonne); se un id compare in entrambi si tiene una sola riga.
+    # componenti_ambientali_1 and _2 are merged (they contain the same set of
+    # patients/columns); if an id appears in both, only one row is kept.
     raw_combined = pd.concat([cohort1, cohort2], ignore_index=True, sort=False)
 
-    # Alcune righe hanno un id NON plausibile (placeholder tipo "novara",
-    # "non prelev", spesso per pazienti senza campione genetico prelevato).
-    # Se non li scartiamo PRIMA della deduplica, pazienti diversi che
-    # condividono lo stesso placeholder come "id" collasserebbero in una
-    # sola riga, perdendo dati reali. Non avendo comunque un id valido non
-    # possono essere associati a nessuna corte genotipica, quindi vengono
-    # esclusi qui in modo esplicito e tracciato.
+    # Some rows have a NON-plausible id (placeholder such as "novara",
+    # "not collected", typically for patients with no genetic sample drawn).
+    # If we don't discard them BEFORE de-duplication, different patients
+    # sharing the same placeholder as "id" would collapse into a single row,
+    # losing real data. Since they don't have a valid id anyway, they cannot
+    # be matched to any genotype cohort, so they are explicitly excluded here
+    # and logged.
     valid_mask = raw_combined[ID_COL].apply(is_plausible_patient_id)
     n_invalid = (~valid_mask).sum()
     if n_invalid > 0:
         invalid_examples = raw_combined.loc[~valid_mask, ID_COL].astype(str).unique().tolist()[:10]
-        log.add(f"ATTENZIONE: {n_invalid} righe con id NON plausibile (placeholder, es. {invalid_examples}) "
-                 f"escluse PRIMA della deduplica per non farle collassare insieme; questi pazienti non "
-                 f"hanno comunque un id valido da associare a un file genotipico.")
+        log.add(f"WARNING: {n_invalid} rows with a NON-plausible id (placeholder, e.g. {invalid_examples}) "
+                 f"excluded BEFORE de-duplication so they don't collapse together; these patients don't "
+                 f"have a valid id to match against a genotype file anyway.")
         raw_combined = raw_combined.loc[valid_mask].copy()
 
     n_before = raw_combined.shape[0]
@@ -681,54 +743,54 @@ def main():
                 if len(conflicting_examples) < 5:
                     conflicting_examples.append(idv)
         if n_conflicting > 0:
-            log.add(f"ATTENZIONE: {n_conflicting} id validi ma duplicati hanno righe con VALORI DISCORDANTI "
-                     f"(non solo copie identiche); viene tenuta la prima riga trovata, le altre scartate. "
-                     f"Esempi: {conflicting_examples}. Verifica se serve una regola di scelta diversa.")
+            log.add(f"WARNING: {n_conflicting} valid but duplicated ids have rows with DISCORDANT VALUES "
+                     f"(not just identical copies); the first row found is kept, others discarded. "
+                     f"Examples: {conflicting_examples}. Check whether a different tie-break rule is needed.")
 
     raw_combined = raw_combined.drop_duplicates(subset=ID_COL, keep="first")
     n_after = raw_combined.shape[0]
     if n_before != n_after:
-        log.add(f"Uniti componenti_ambientali_1 e _2 (dopo scarto id non plausibili): {n_before} righe -> "
-                 f"{n_after} righe dopo deduplica su id ({n_before - n_after} duplicati rimossi)")
+        log.add(f"Merged componenti_ambientali_1 and _2 (after discarding implausible ids): {n_before} rows -> "
+                 f"{n_after} rows after de-duplication on id ({n_before - n_after} duplicates removed)")
     else:
-        log.add(f"Uniti componenti_ambientali_1 e _2 (dopo scarto id non plausibili): {n_after} righe, "
-                 f"nessun id duplicato trovato")
+        log.add(f"Merged componenti_ambientali_1 and _2 (after discarding implausible ids): {n_after} rows, "
+                 f"no duplicate id found")
 
-    full = merge_side_file(raw_combined, fumo, "fumo", "dataset combinato", log)
-    full = merge_side_file(full, scolarita, "scolarita", "dataset combinato", log)
+    full = merge_side_file(raw_combined, fumo, "fumo", "combined dataset", log)
+    full = merge_side_file(full, scolarita, "scolarita", "combined dataset", log)
 
-    # ---------------- ASSEGNAZIONE CORTE DA FILE GENOTIPICI ----------------
-    gen1_ids = load_ids_from_genotype_file(args.gen1_ids_file, log, "gen1 (Corte 1, RES)")
-    gen2_ids = load_ids_from_genotype_file(args.gen2_ids_file, log, "gen2 (Corte 2, ACH)")
+    # ---------------- COHORT ASSIGNMENT FROM GENOTYPE FILES ----------------
+    gen1_ids = load_ids_from_genotype_file(args.gen1_ids_file, log, "gen1 (Cohort 1, RES)")
+    gen2_ids = load_ids_from_genotype_file(args.gen2_ids_file, log, "gen2 (Cohort 2, ACH)")
 
     overlap = gen1_ids & gen2_ids
     if overlap:
-        log.add(f"ATTENZIONE: {len(overlap)} id presenti in ENTRAMBI i file genotipici; "
-                 f"assegnati a Corte 1 per priorità.")
+        log.add(f"WARNING: {len(overlap)} ids present in BOTH genotype files; "
+                 f"assigned to Cohort 1 by priority.")
 
     def assign_cohort(id_val):
         doubled = f"{id_val}_{id_val}"
         if id_val in gen1_ids or doubled in gen1_ids:
-            return "Corte 1"
+            return GROUP1_LABEL
         if id_val in gen2_ids or doubled in gen2_ids:
-            return "Corte 2"
+            return GROUP2_LABEL
         return None
 
     full[GROUP_COL] = full[ID_COL].astype(str).map(assign_cohort)
 
     n_unassigned = full[GROUP_COL].isna().sum()
     if n_unassigned > 0:
-        log.add(f"ATTENZIONE: {n_unassigned} id in componenti_ambientali non trovati in NESSUNO dei due file "
-                 f"genotipici; verranno esclusi dall'analisi. Controlla il formato dell'id "
-                 f"(atteso identico a quello genotipico, es. 'RES02977_RES02977').")
+        log.add(f"WARNING: {n_unassigned} ids in componenti_ambientali not found in EITHER of the two "
+                 f"genotype files; they will be excluded from the analysis. Check the id format "
+                 f"(expected identical to the genotype one, e.g. 'RES02977_RES02977').")
         full = full.dropna(subset=[GROUP_COL])
 
-    log.add(f"Dataset finale: {full.shape[0]} righe, {full.shape[1]} colonne. "
-            f"Distribuzione '{GROUP_COL}': {full[GROUP_COL].value_counts().to_dict()}")
+    log.add(f"Final dataset: {full.shape[0]} rows, {full.shape[1]} columns. "
+            f"Distribution of '{GROUP_COL}': {full[GROUP_COL].value_counts().to_dict()}")
 
     full = clean_code_like_values(full, COLUMNS_TO_CLEAN_CODE_LIKE, log)
 
-    buffer_vars = detect_buffer_vars(full)
+    buffer_vars = detect_buffer_vars(full, seminativi_buffers=seminativi_buffers)
     continuous_vars = [v for v in BASE_CONTINUOUS_VARS if v in full.columns]
     if "education_years" in full.columns:
         continuous_vars.append("education_years")
@@ -740,48 +802,62 @@ def main():
     if "education_level" in full.columns:
         categorical_vars.append("education_level")
 
-    log.add(f"Variabili continue analizzate ({len(continuous_vars)}): {continuous_vars}")
-    log.add(f"Variabili categoriche analizzate ({len(categorical_vars)}): {categorical_vars}")
+    log.add(f"Continuous variables analyzed ({len(continuous_vars)}): {continuous_vars}")
+    log.add(f"Categorical variables analyzed ({len(categorical_vars)}): {categorical_vars}")
 
     rows, g1, g2 = build_table1(full, GROUP_COL, continuous_vars, categorical_vars, log)
 
     csv_path = os.path.join(out_dir, "table1.csv")
     save_table1_csv(rows, g1, g2, csv_path)
-    log.add(f"Salvato {csv_path}")
+    log.add(f"Saved {csv_path}")
 
-    full.to_csv(os.path.join(out_dir, "dataset_combinato.csv"), index=False, encoding="utf-8-sig")
-    log.add("Salvato dataset_combinato.csv (join completo, utile per analisi successive)")
+    full.to_csv(os.path.join(out_dir, "combined_dataset.csv"), index=False, encoding="utf-8-sig")
+    log.add("Saved combined_dataset.csv (full join, useful for downstream analyses)")
 
-    # ---------------- IMMAGINI ----------------
+    # ---------------- FIGURES ----------------
     appendix_images = []
 
     for var in [v for v in BASE_CONTINUOUS_VARS + (["education_years"] if "education_years" in full.columns else []) if v in full.columns]:
         p = plot_continuous_box(full, var, GROUP_COL, g1, g2, os.path.join(img_dir, f"boxplot_{var}.png"), log)
         if p:
-            appendix_images.append((p, f"Distribuzione di {var} per corte"))
+            appendix_images.append((p, f"Distribution of {var} by cohort"))
 
     for var in categorical_vars:
         p = plot_categorical_bar(full, var, GROUP_COL, g1, g2, img_dir, log)
         if p:
-            appendix_images.append((p, f"Distribuzione di {var} per corte"))
+            appendix_images.append((p, f"Distribution of {var} by cohort"))
 
     for category in ["seminativi", "vigneti", "risaie"]:
-        p1 = plot_buffer_grouped_box(full, category, GROUP_COL, g1, g2, img_dir, log)
-        if p1:
-            appendix_images.append((p1, f"{category}: boxplot per buffer, {g1} vs {g2}"))
-        p2 = plot_buffer_pvalue_trend(full, category, GROUP_COL, g1, g2, img_dir, log)
-        if p2:
-            appendix_images.append((p2, f"{category}: andamento del p-value al variare del buffer"))
+        if category == "seminativi" and seminativi_buffers is not None:
+            cat_buffer_cols = [f"seminativi_{b}" for b in seminativi_buffers if f"seminativi_{b}" in full.columns]
+        else:
+            cat_buffer_cols = [c for c in full.columns if c.startswith(category + "_")]
 
-    log.add(f"Generate {len(appendix_images)} immagini in {img_dir}")
+        if len(cat_buffer_cols) <= 1:
+            # Single buffer selected: a grouped/trend-by-buffer plot doesn't
+            # make sense, so fall back to a simple single boxplot instead.
+            if cat_buffer_cols:
+                var = cat_buffer_cols[0]
+                p = plot_continuous_box(full, var, GROUP_COL, g1, g2, os.path.join(img_dir, f"boxplot_{var}.png"), log)
+                if p:
+                    appendix_images.append((p, f"Distribution of {var} by cohort"))
+        else:
+            p1 = plot_buffer_grouped_box(full, category, GROUP_COL, g1, g2, img_dir, log, buffer_cols=cat_buffer_cols)
+            if p1:
+                appendix_images.append((p1, f"{category}: boxplot by buffer distance, {g1} vs {g2}"))
+            p2 = plot_buffer_pvalue_trend(full, category, GROUP_COL, g1, g2, img_dir, log, buffer_cols=cat_buffer_cols)
+            if p2:
+                appendix_images.append((p2, f"{category}: p-value trend across buffer distances"))
+
+    log.add(f"Generated {len(appendix_images)} images in {img_dir}")
 
     # ---------------- DOCX ----------------
     docx_path = os.path.join(out_dir, "table1.docx")
     save_table1_docx(rows, g1, g2, docx_path, images_for_appendix=appendix_images)
-    log.add(f"Salvato {docx_path}")
+    log.add(f"Saved {docx_path}")
 
     log.save(os.path.join(out_dir, "run_log.txt"))
-    log.add("Completato.")
+    log.add("Done.")
 
 
 if __name__ == "__main__":
