@@ -130,7 +130,7 @@ def bootstrap_median_diff_ci(mutati, non_mutati, n_boot=N_BOOT, alpha=ALPHA, see
 
 def make_boxplot(mutati, non_mutati, variant, cohort, out_dir):
     fig, ax = plt.subplots(figsize=(4, 5))
-    ax.boxplot([non_mutati, mutati], labels=["WT", "Mutato"], showmeans=True)
+    ax.boxplot([non_mutati, mutati], tick_labels=["WT", "Mutato"], showmeans=True)
     ax.set_ylabel("Età d'esordio")
     ax.set_title(f"{variant}\ncoorte {cohort}")
     fig.tight_layout()
@@ -147,7 +147,7 @@ def make_combined_boxplot(groups_for_variant, variant, out_dir):
 
     for ax, cohort in zip(axes, cohorts_present):
         mutati, non_mutati = groups_for_variant[cohort]
-        ax.boxplot([non_mutati, mutati], labels=["WT", "Mutato"], showmeans=True)
+        ax.boxplot([non_mutati, mutati], tick_labels=["WT", "Mutato"], showmeans=True)
         ax.set_title(f"Coorte {cohort}")
 
     axes[0].set_ylabel("Età d'esordio")
