@@ -2,7 +2,9 @@
 """
 Analizza la differenza di età d'esordio (onset_age) fra pazienti mutati e non
 mutati, per ciascuna variante significativa e per ciascuna coorte (1 e 2),
-a partire dalle matrici prodotte da extract_significant_variant_matrices.py.
+a partire dalla matrice combinata prodotta da extract_significant_variants_vcf.py
+(combined_significant_variants.csv, colonna "generation" 1/2/3, id prefissati
+gen1_/gen2_/gen3_). Solo le coorti 1 e 2 vengono analizzate; gen3 e' escluso.
 
 Test statistico: Mann-Whitney U (default, non parametrico — robusto rispetto a
 outlier/non normalità tipica dell'età d'esordio). Alternativa: t-test di Welch
@@ -33,10 +35,15 @@ import matplotlib.pyplot as plt
 from config import TARGET_COL, COVARIATES
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
-ONSET_FILE          = "data/onset_age.csv"   # contiene ENTRAMBE le generazioni
+# Path assoluto allo script, cosi' i percorsi relativi funzionano indipendentemente
+# dalla directory da cui si lancia lo script.
+SCRIPT_DIR           = os.path.dirname(os.path.abspath(__file__))
+
+ONSET_FILE           = os.path.join(SCRIPT_DIR, "data/componenti_ambientali_scolarita.csv")
 SAMPLE_ID_COL        = "id"
-MATRIX_DIR           = "/srv/python-projects/gene-environment/significant_variant_matrices"
+COMBINED_MATRIX_FILE = "/srv/python-projects/gene-environment/significant_variant_matrices/combined_significant_variants.csv"
 OUT_DIR              = "/srv/python-projects/gene-environment/onset_age_analysis"
+COHORTS              = (1, 2)  # gen3 escluso di proposito
 USE_MANN_WHITNEY     = True
 ALPHA                = 0.05
 MIN_GROUP_SIZE       = 5    # minimo pazienti per gruppo per eseguire il test
@@ -49,6 +56,33 @@ RANDOM_STATE         = 42
 def load_onset_age():
     df = pd.read_csv(ONSET_FILE, usecols=[SAMPLE_ID_COL, TARGET_COL] + COVARIATES)
     return df.set_index(SAMPLE_ID_COL)
+
+
+def load_genotype_matrix_for_cohort(cohort):
+    """
+    Legge la matrice combinata (tutte le generazioni) e restituisce solo le
+    righe della generazione richiesta, con l'indice "id" ripulito dal prefisso
+    "genN_" cosi' da poter fare il join con df_onset (che usa id non prefissati).
+    Ritorna None se il file combinato non esiste o la coorte non e' presente.
+    """
+    if not os.path.exists(COMBINED_MATRIX_FILE):
+        print(f"[WARN] Manca {COMBINED_MATRIX_FILE}")
+        return None
+
+    df_all = pd.read_csv(COMBINED_MATRIX_FILE, index_col="id")
+    df_cohort = df_all[df_all["generation"] == cohort].drop(columns=["generation"])
+
+    if df_cohort.empty:
+        print(f"[WARN] Nessun paziente per coorte {cohort} in {COMBINED_MATRIX_FILE}")
+        return None
+
+    prefix = f"gen{cohort}_"
+    df_cohort.index = [
+        idx[len(prefix):] if idx.startswith(prefix) else idx
+        for idx in df_cohort.index
+    ]
+    df_cohort.index.name = "id"
+    return df_cohort
 
 
 def run_test(mutati, non_mutati):
@@ -166,13 +200,11 @@ def main():
     rows = []
     groups = {}  # groups[variant][cohort] = (mutati_series, non_mutati_series)
 
-    for cohort in (1, 2):
-        matrix_path = os.path.join(MATRIX_DIR, f"cohort{cohort}_significant_variants.csv")
-        if not os.path.exists(matrix_path):
-            print(f"[WARN] Manca {matrix_path}, salto coorte {cohort}")
+    for cohort in COHORTS:
+        df_geno = load_genotype_matrix_for_cohort(cohort)
+        if df_geno is None:
             continue
 
-        df_geno = pd.read_csv(matrix_path, index_col="id")
         df = df_geno.join(df_onset, how="inner")
 
         variants = list(df_geno.columns)
