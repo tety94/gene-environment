@@ -26,12 +26,21 @@ Usage: python extract_significant_variant_matrices.py
 """
 import os
 import glob
+import time
+import logging
 import subprocess
 import numpy as np
 import pandas as pd
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from db import get_significant_results
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+log = logging.getLogger(__name__)
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
 GENOTYPE_FILES = {
@@ -40,7 +49,7 @@ GENOTYPE_FILES = {
 }
 OUT_DIR = "/srv/python-projects/gene-environment/significant_variant_matrices"
 TMP_DIR = "/tmp/significant_variant_extract"
-N_WORKERS = os.cpu_count() or 8  # numero di chunk di righe in cui dividere ciascun file
+N_WORKERS = os.cpu_count() or 4  # numero di chunk di righe in cui dividere ciascun file
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -109,23 +118,41 @@ def extract_columns_parallel(path, id_col_pos, wanted_positions, tmp_out, tmp_di
 
     chunk_prefix = os.path.join(tmp_dir, os.path.basename(path) + ".chunk_")
 
+    t0 = time.perf_counter()
     skip = "tail -n +2" if has_header else "cat"
     split_cmd = f"{skip} {path} | split -n l/{n_workers} -d -a 3 - {chunk_prefix}"
     subprocess.run(split_cmd, shell=True, check=True)
+    log.info("  split in chunk completato in %.1fs", time.perf_counter() - t0)
 
     chunk_files = sorted(glob.glob(chunk_prefix + "*"))
     if not chunk_files:
         chunk_files = [path]
+    n_chunks = len(chunk_files)
+    log.info("  avvio estrazione colonne su %d chunk (n_workers=%d)", n_chunks, n_workers)
 
     tasks = [(cf, awk_field_list, f"{cf}.out") for cf in chunk_files]
 
+    t0 = time.perf_counter()
+    out_files_by_task = {}
     with ProcessPoolExecutor(max_workers=n_workers) as ex:
-        out_files = list(ex.map(_awk_extract_chunk, tasks))
+        futures = {ex.submit(_awk_extract_chunk, task): task for task in tasks}
+        done_count = 0
+        for fut in as_completed(futures):
+            task = futures[fut]
+            out_files_by_task[task] = fut.result()
+            done_count += 1
+            log.info("  chunk completato: %d/%d", done_count, n_chunks)
+    log.info("  estrazione parallela completata in %.1fs", time.perf_counter() - t0)
 
+    # ordine originale dei chunk (as_completed non garantisce l'ordine di arrivo)
+    out_files = [out_files_by_task[task] for task in tasks]
+
+    t0 = time.perf_counter()
     with open(tmp_out, "w") as fout:
         for of in out_files:
             with open(of, "r") as fin:
                 fout.write(fin.read())
+    log.info("  concatenazione chunk completata in %.1fs", time.perf_counter() - t0)
 
     for cf in chunk_files:
         if cf != path and os.path.exists(cf):
@@ -136,25 +163,33 @@ def extract_columns_parallel(path, id_col_pos, wanted_positions, tmp_out, tmp_di
 
 
 def extract_cohort(generation, variant_labels, out_dir, tmp_dir):
+    t_start = time.perf_counter()
+    log.info("=== Coorte %d: inizio ===", generation)
+
     path = GENOTYPE_FILES[generation]
     if not os.path.exists(path):
-        print(f"[WARN] File non trovato per generation {generation}: {path}")
+        log.warning("File non trovato per generation %d: %s", generation, path)
         return f"generation {generation}: file non trovato"
 
+    t0 = time.perf_counter()
     header = pd.read_csv(path, nrows=0).columns.tolist()
+    log.info("  header letto (%d colonne totali) in %.1fs", len(header), time.perf_counter() - t0)
+
     id_col = load_id_col(header)
     id_col_pos = header.index(id_col) + 1  # awk è 1-based
 
     present = [v for v in variant_labels if v in header]
     missing = [v for v in variant_labels if v not in header]
     if missing:
-        print(f"  [WARN] Coorte {generation}: {len(missing)} varianti non trovate nel file:")
+        log.warning("Coorte %d: %d varianti non trovate nel file:", generation, len(missing))
         for m in missing:
-            print(f"     - {m}")
+            log.warning("     - %s", m)
 
     if not present:
-        print(f"  [ERROR] Coorte {generation}: nessuna variante significativa presente nel file.")
+        log.error("Coorte %d: nessuna variante significativa presente nel file.", generation)
         return f"generation {generation}: nessuna variante trovata"
+
+    log.info("  %d/%d varianti presenti nel file per questa coorte", len(present), len(variant_labels))
 
     wanted_positions = [header.index(v) + 1 for v in present]
 
@@ -163,12 +198,15 @@ def extract_cohort(generation, variant_labels, out_dir, tmp_dir):
 
     extract_columns_parallel(path, id_col_pos, wanted_positions, tmp_out, tmp_dir)
 
-    # ordine colonne nel file filtrato: id, poi 'present' nell'ordine originale
+    t0 = time.perf_counter()
     filtered_col_names = ["id"] + present
     df = pd.read_csv(tmp_out, header=None, names=filtered_col_names, dtype=str)
     df = df.set_index("id")
+    log.info("  file filtrato letto in pandas (%d pazienti) in %.1fs", len(df), time.perf_counter() - t0)
 
+    t0 = time.perf_counter()
     df_bin = binarize_vectorized(df)
+    log.info("  binarizzazione completata in %.1fs", time.perf_counter() - t0)
 
     out_path = os.path.join(out_dir, f"cohort{generation}_significant_variants.csv")
     df_bin.to_csv(out_path)
@@ -176,22 +214,24 @@ def extract_cohort(generation, variant_labels, out_dir, tmp_dir):
     os.remove(tmp_out)
 
     msg = f"Coorte {generation}: {out_path}  ({len(df_bin)} pazienti, {df_bin.shape[1]} varianti)"
-    print(f"  -> {msg}")
+    log.info("  -> %s", msg)
+    log.info("=== Coorte %d: completata in %.1fs totali ===", generation, time.perf_counter() - t_start)
     return msg
 
 
 def main():
-    print("=== Recupero varianti significative (entrambe le coorti) dal DB ===")
+    log.info("=== Recupero varianti significative (entrambe le coorti) dal DB ===")
+    t_total = time.perf_counter()
     sig = get_significant_results()
     if sig.empty:
-        print("[INFO] Nessuna variante significativa trovata in entrambe le coorti. Esco.")
+        log.info("Nessuna variante significativa trovata in entrambe le coorti. Esco.")
         return
 
     sig["label"] = sig.apply(
         lambda r: build_variant_label(r["chromosome"], r["position"], r["mutation"]), axis=1
     )
     unique_labels = sorted(sig["label"].unique())
-    print(f"  {len(unique_labels)} varianti uniche da estrarre.")
+    log.info("%d varianti uniche da estrarre.", len(unique_labels))
 
     os.makedirs(OUT_DIR, exist_ok=True)
     os.makedirs(TMP_DIR, exist_ok=True)
@@ -205,9 +245,9 @@ def main():
         try:
             extract_cohort(gen, unique_labels, OUT_DIR, TMP_DIR)
         except Exception as e:
-            print(f"[ERROR] Coorte {gen} fallita: {e}")
+            log.error("Coorte %d fallita: %s", gen, e)
 
-    print("\n=== Fatto ===")
+    log.info("=== Fatto in %.1fs totali ===", time.perf_counter() - t_total)
 
 
 if __name__ == "__main__":
