@@ -1,38 +1,47 @@
 #!/usr/bin/env python3
 """
-Estrae, per le varianti significative in ENTRAMBE le coorti (generation 1 e 2,
-secondo db.get_significant_results()), il genotipo binario (0 = non mutato,
-1 = mutato) per ciascun paziente, producendo due CSV (uno per coorte)
-pazienti x varianti.
+Estrae, per le varianti significative (secondo db.get_significant_results()),
+il genotipo binario (0 = non mutato, 1 = mutato) per ciascun paziente in
+gen1, gen2 e gen3, direttamente dai VCF indicizzati per cromosoma (bcftools),
+invece che dai CSV "full genome" derivati (lenti, e nel caso di gen2/gen3
+con colonne duplicate per lo stesso sito, vedi diagnose_variant_structure.py).
 
-Versione ottimizzata per file "full genome" con centinaia di migliaia di colonne:
-  - Pre-filtro colonne con awk (stream, C-level split) prima di passare a pandas,
-    invece di lasciare che il parser C di pandas tokenizzi ogni riga per intero
-    con usecols (che scarta le colonne DOPO averle comunque splittate).
-  - Binarizzazione vettorizzata con numpy invece di applymap cella-per-cella.
-  - Parallelizzazione per RIGHE (pazienti), non per varianti: splittare per
-    variante non riduce il lavoro (ogni riga va comunque interamente
-    tokenizzata per estrarre anche una sola colonna), quindi il file viene
-    diviso in N chunk di righe e l'estrazione delle 34 colonne gira in
-    parallelo su ciascun chunk, poi i risultati vengono concatenati.
+Vantaggi rispetto all'approccio CSV:
+  - Query di regione dirette via indice .tbi -> nessuna scansione dell'intero
+    file, il tempo di estrazione e' indipendente dalla dimensione del VCF.
+  - Nessun problema di colonne duplicate: si legge direttamente dal VCF
+    sorgente, non da un CSV derivato con una conversione a monte sconosciuta.
+  - Gestione corretta di siti multiallelici: si verifica che REF/ALT nel VCF
+    corrispondano esattamente a quanto atteso, e si calcola il dosaggio
+    sull'indice allelico corretto (non si assume sempre "ALT singolo").
 
 Fonte varianti significative : db.get_significant_results()
-Fonte genotipi               : i file genetici RAW per generazione (stesso formato
-                                usato da data_loader.py: colonna id/IID + una colonna
-                                per variante, nome "{chrom}_{pos}_{mutation}",
-                                valori dosaggio 0/1/2/-1/. ecc.)
+Fonte genotipi                : VCF indicizzati per cromosoma:
+    gen1: /mnt/cresla_prod/genome_datasets/gen1/gen1_onlycases_vcf_chr{N}.vcf.gz
+    gen2: /mnt/cresla_prod/genome_datasets/gen2/gen2_vcf_chr{N}.vcf.gz
+    gen3: /mnt/cresla_prod/genome_datasets/gen3/gen3_vcf_chr{N}.vcf.gz
 
-Usage: python extract_significant_variant_matrices.py
+NOTA IMPORTANTE: gen1 ("onlycases") contiene SOLO pazienti caso, mentre
+gen2/gen3 hanno una composizione diversa (confermato dall'utente) -> le tre
+coorti non sono direttamente comparabili come popolazione, la colonna
+"generation" nell'output serve proprio a poterle distinguere/filtrare a valle.
+
+Output: un UNICO CSV combinato con:
+  - colonna "id"          : id paziente prefissato per coorte (gen1_..., gen2_..., gen3_...)
+  - colonna "generation"   : 1, 2, o 3
+  - una colonna per ciascuna variante significativa (0/1/NA)
+
+Usage: python extract_significant_variants_vcf.py
 """
 import os
-import glob
+import re
 import time
-import shutil
 import logging
 import subprocess
+from collections import defaultdict
+
 import numpy as np
 import pandas as pd
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from db import get_significant_results
 
@@ -44,17 +53,18 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
-GENOTYPE_FILES = {
-    1: "/mnt/cresla_prod/genome_datasets/merged_csv/full_chr_gen1_test1.csv",
-    2: "/mnt/cresla_prod/genome_datasets/merged_csv/gen2_variants.csv",
+VCF_DIR = {
+    1: "/mnt/cresla_prod/genome_datasets/gen1",
+    2: "/mnt/cresla_prod/genome_datasets/gen2",
+    3: "/mnt/cresla_prod/genome_datasets/gen3",
+}
+VCF_FILENAME_PATTERN = {
+    1: "gen1_onlycases_vcf_chr{chrom}.vcf.gz",
+    2: "gen2_vcf_chr{chrom}.vcf.gz",
+    3: "gen3_vcf_chr{chrom}.vcf.gz",
 }
 OUT_DIR = "/srv/python-projects/gene-environment/significant_variant_matrices"
-TMP_DIR = "/tmp/significant_variant_extract"
-# cache locale: il file remoto (su mount di rete lento) viene copiato qui UNA
-# SOLA VOLTA; le run successive (anche per varianti diverse) riusano la copia
-# locale invece di ripagare il costo di rete ogni volta.
-LOCAL_CACHE_DIR = "/srv/python-projects/gene-environment/_local_cache"
-N_WORKERS = os.cpu_count() or 4  # numero di chunk di righe in cui dividere ciascun file
+BCFTOOLS = "bcftools"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -62,258 +72,255 @@ def build_variant_label(chromosome, position, mutation):
     return f"{chromosome}_{position}_{mutation}"
 
 
-def ensure_local_copy(remote_path, cache_dir):
+def vcf_path_for(generation, chrom):
+    filename = VCF_FILENAME_PATTERN[generation].format(chrom=chrom)
+    return os.path.join(VCF_DIR[generation], filename)
+
+
+def detect_chrom_naming(vcf_path):
     """
-    Copia remote_path in cache_dir UNA SOLA VOLTA (se non gia' presente) e
-    ritorna il path locale. Pensato per file enormi su mount di rete lenti:
-    invece di ripetere letture (parziali o casuali) sul mount remoto ad ogni
-    fase (header, split, chunk) e ad ogni run, si paga il costo di rete una
-    volta sola con una copia sequenziale, poi tutto il resto lavora su disco
-    locale (piu' veloce, niente contesa con letture parallele sullo stesso
-    mount remoto).
-
-    Usa rsync --partial cosi' se la copia si interrompe a meta' (file enorme,
-    run lunga) puo' riprendere da dove si era fermata invece di ripartire da
-    zero.
+    Determina se il VCF usa 'chr1' o '1' come nome di contig, leggendo SOLO
+    l'header (##contig=<ID=...>), senza scansionare i dati. Ritorna il primo
+    ID di contig trovato nell'header, o None se non trovato (fallback: si
+    prova comunque con il nome cromosoma cosi' com'e').
     """
-    os.makedirs(cache_dir, exist_ok=True)
-    local_path = os.path.join(cache_dir, os.path.basename(remote_path))
-
-    if os.path.exists(local_path):
-        remote_size = os.path.getsize(remote_path)
-        local_size = os.path.getsize(local_path)
-        if local_size == remote_size:
-            log.info("copia locale gia' presente e completa: %s (salto il trasferimento)", local_path)
-            return local_path
-        else:
-            log.info(
-                "copia locale presente ma incompleta (%d/%d byte), riprendo il trasferimento",
-                local_size, remote_size,
-            )
-
-    remote_size = os.path.getsize(remote_path)
-    free_space = shutil.disk_usage(cache_dir).free
-    if free_space < remote_size:
-        raise RuntimeError(
-            f"Spazio insufficiente in {cache_dir}: servono {remote_size / 1e9:.1f} GB, "
-            f"disponibili {free_space / 1e9:.1f} GB"
+    try:
+        result = subprocess.run(
+            [BCFTOOLS, "view", "-h", vcf_path],
+            capture_output=True, text=True, check=True,
         )
+    except subprocess.CalledProcessError as e:
+        log.warning("Impossibile leggere l'header di %s: %s", vcf_path, e)
+        return None
 
-    log.info(
-        "copia locale non trovata (o incompleta), copio una volta sola da %s (%.1f GB)",
-        remote_path, remote_size / 1e9,
-    )
-    t0 = time.perf_counter()
-    subprocess.run(
-        ["rsync", "-ah", "--partial", "--inplace", remote_path, local_path],
-        check=True,
-    )
-    elapsed = time.perf_counter() - t0
-    log.info("copia locale completata in %.1fs (%.1f MB/s) -> %s",
-              elapsed, remote_size / 1e6 / max(elapsed, 0.001), local_path)
-    return local_path
-
-def load_id_col(header):
-    """Trova la colonna id, gestendo il rename IID -> id fatto da data_loader.py."""
-    if "id" in header:
-        return "id"
-    if "IID" in header:
-        return "IID"
-    raise ValueError(f"Nessuna colonna id/IID trovata nell'header: {header[:10]}...")
+    for line in result.stdout.splitlines():
+        if line.startswith("##contig"):
+            m = re.search(r"ID=([^,>]+)", line)
+            if m:
+                return m.group(1)
+    return None
 
 
-def binarize_vectorized(df_geno):
+def resolve_chrom_name(chrom_raw, vcf_path, _cache={}):
     """
-    Converte dosaggio in presenza mutazione binaria (vettorizzato, no loop Python):
-      0            -> 0 (non mutato)
-      1 oppure 2   -> 1 (mutato)
-      qualsiasi altro valore (-1, ., NaN, ...) -> NA (missing, escluso a valle)
+    Ritorna il nome di cromosoma da usare nella query (es. '12' o 'chr12'),
+    rilevato una sola volta per file e messo in cache.
     """
-    df_num = df_geno.apply(pd.to_numeric, errors="coerce")
+    if vcf_path in _cache:
+        contig_example = _cache[vcf_path]
+    else:
+        contig_example = detect_chrom_naming(vcf_path)
+        _cache[vcf_path] = contig_example
+
+    if contig_example is None:
+        return chrom_raw  # fallback: nessuna informazione, si prova cosi' com'e'
+
+    if contig_example.startswith("chr") and not chrom_raw.startswith("chr"):
+        return f"chr{chrom_raw}"
+    if not contig_example.startswith("chr") and chrom_raw.startswith("chr"):
+        return chrom_raw[3:]
+    return chrom_raw
+
+
+def get_samples(vcf_path):
+    result = subprocess.run(
+        [BCFTOOLS, "query", "-l", vcf_path],
+        capture_output=True, text=True, check=True,
+    )
+    return result.stdout.strip().split("\n") if result.stdout.strip() else []
+
+
+def query_positions(vcf_path, chrom, positions):
+    """
+    Interroga il VCF per una lista di posizioni sullo stesso cromosoma,
+    sfruttando l'indice .tbi (query di regione, non scansione completa).
+    Ritorna le righe grezze di bcftools query (CHROM, POS, REF, ALT, GT...).
+    """
+    region_list = ",".join(f"{chrom}:{pos}-{pos}" for pos in positions)
+    cmd = [
+        BCFTOOLS, "query",
+        "-r", region_list,
+        "-f", "%CHROM\t%POS\t%REF\t%ALT[\t%GT]\n",
+        vcf_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def parse_gt_row(line, target_ref, target_alt):
+    """
+    Ritorna la lista di dosaggi (0/1/2/-1=missing) per la riga, oppure None
+    se REF/ALT nel VCF non corrispondono a quanto atteso (mismatch da
+    segnalare, non da ignorare silenziosamente).
+    """
+    parts = line.split("\t")
+    ref, alt_field = parts[2], parts[3]
+    gts = parts[4:]
+
+    alt_list = alt_field.split(",")
+    if ref != target_ref or target_alt not in alt_list:
+        return None
+
+    target_idx = str(alt_list.index(target_alt) + 1)  # 0=REF, 1=primo ALT, ecc.
+
+    dosages = []
+    for gt in gts:
+        alleles = re.split(r"[/|]", gt)
+        if any(a == "." for a in alleles):
+            dosages.append(-1)
+        else:
+            dosages.append(sum(1 for a in alleles if a == target_idx))
+    return dosages
+
+
+def binarize_vectorized(df_dosage):
+    """
+    0 -> 0 (non mutato), 1/2 -> 1 (mutato), -1/altro/NaN -> NaN (missing).
+    Vettorizzato con numpy invece di applymap (piu' veloce, e applymap e'
+    deprecato da pandas >=2.1).
+    """
+    df_num = df_dosage.apply(pd.to_numeric, errors="coerce")
     arr = np.select(
         [df_num.eq(0), df_num.isin([1, 2])],
         [0, 1],
         default=np.nan,
     )
-    return pd.DataFrame(arr, index=df_geno.index, columns=df_geno.columns)
+    return pd.DataFrame(arr, index=df_dosage.index, columns=df_dosage.columns)
 
 
-def _awk_extract_chunk(args):
+def extract_generation(generation, variants_df):
     """
-    Estrae le colonne richieste da UN chunk di righe (worker per ProcessPoolExecutor).
-    Girato in parallelo su tutti i chunk: il parallelismo e' sulle RIGHE (pazienti),
-    non sulle varianti, perche' il costo di tokenizzare una riga e' quasi tutto
-    fisso indipendentemente da quante colonne vengono tenute alla fine -> frazionare
-    per variante rilegge l'intero file N volte invece di dividerne il costo per N.
+    variants_df: DataFrame con colonne chrom, pos, ref, alt, label per TUTTE
+    le varianti significative (stesse per ogni generazione, si controlla per
+    ciascuna se e' presente nel VCF di questa generazione).
+
+    Ritorna (df_bin, labels_not_found) dove df_bin ha indice = id paziente
+    (senza prefisso, aggiunto dal chiamante) e colonne = varianti trovate.
     """
-    chunk_path, awk_field_list, out_path = args
-    awk_cmd = f"awk -F',' 'BEGIN{{OFS=\",\"}} {{print {awk_field_list}}}' {chunk_path} > {out_path}"
-    subprocess.run(awk_cmd, shell=True, check=True)
-    return out_path
-
-
-def extract_columns_parallel(path, id_col_pos, wanted_positions, tmp_out, tmp_dir,
-                              n_workers=N_WORKERS, has_header=True):
-    """
-    Pre-filtra le colonne a livello di stream con awk, PRIMA di passare a pandas,
-    parallelizzando sui BLOCCHI DI RIGHE del file (non sulle varianti):
-
-      1. split del file dati (header escluso) in n_workers chunk, preservando
-         i confini di riga (split -n l/N non spezza mai una riga a meta').
-      2. ogni chunk viene processato da un worker awk indipendente che estrae
-         id + le colonne richieste (stesso comando per tutti, cambia solo il
-         file di input).
-      3. i risultati vengono concatenati in ordine nel file finale.
-
-    Questo distribuisce il costo reale (tokenizzare ogni riga del file
-    full-genome) su piu' core, mentre il numero di varianti resta ininfluente
-    sul grado di parallelismo.
-    """
-    all_positions = [id_col_pos] + wanted_positions
-    awk_field_list = ",".join(f"${p}" for p in all_positions)
-
-    chunk_prefix = os.path.join(tmp_dir, os.path.basename(path) + ".chunk_")
-
-    t0 = time.perf_counter()
-    skip = "tail -n +2" if has_header else "cat"
-    # r/N (round-robin) invece di l/N: l/N richiede di conoscere la dimensione
-    # totale dell'input per calcolare i tagli, quindi fallisce su una pipe
-    # ("cannot determine file size"). r/N distribuisce le righe una alla volta
-    # tra gli N chunk in streaming, senza bisogno di conoscere la dimensione in
-    # anticipo. Effetto collaterale: l'ordine dei pazienti nel file finale non
-    # coincide con l'ordine originale (sono comunque indicizzati per id, quindi
-    # non e' un problema salvo che codice a valle assuma un ordine posizionale).
-    split_cmd = f"{skip} {path} | split -n r/{n_workers} -d -a 3 - {chunk_prefix}"
-    subprocess.run(split_cmd, shell=True, check=True)
-    log.info("  split in chunk completato in %.1fs", time.perf_counter() - t0)
-
-    chunk_files = sorted(glob.glob(chunk_prefix + "*"))
-    if not chunk_files:
-        chunk_files = [path]
-    n_chunks = len(chunk_files)
-    log.info("  avvio estrazione colonne su %d chunk (n_workers=%d)", n_chunks, n_workers)
-
-    tasks = [(cf, awk_field_list, f"{cf}.out") for cf in chunk_files]
-
-    t0 = time.perf_counter()
-    out_files_by_task = {}
-    with ProcessPoolExecutor(max_workers=n_workers) as ex:
-        futures = {ex.submit(_awk_extract_chunk, task): task for task in tasks}
-        done_count = 0
-        for fut in as_completed(futures):
-            task = futures[fut]
-            out_files_by_task[task] = fut.result()
-            done_count += 1
-            log.info("  chunk completato: %d/%d", done_count, n_chunks)
-    log.info("  estrazione parallela completata in %.1fs", time.perf_counter() - t0)
-
-    # ordine originale dei chunk (as_completed non garantisce l'ordine di arrivo)
-    out_files = [out_files_by_task[task] for task in tasks]
-
-    t0 = time.perf_counter()
-    with open(tmp_out, "w") as fout:
-        for of in out_files:
-            with open(of, "r") as fin:
-                fout.write(fin.read())
-    log.info("  concatenazione chunk completata in %.1fs", time.perf_counter() - t0)
-
-    for cf in chunk_files:
-        if cf != path and os.path.exists(cf):
-            os.remove(cf)
-    for of in out_files:
-        if os.path.exists(of):
-            os.remove(of)
-
-
-def extract_cohort(generation, variant_labels, out_dir, tmp_dir):
     t_start = time.perf_counter()
-    log.info("=== Coorte %d: inizio ===", generation)
+    log.info("=== Generazione %d: inizio ===", generation)
 
-    remote_path = GENOTYPE_FILES[generation]
-    if not os.path.exists(remote_path):
-        log.warning("File non trovato per generation %d: %s", generation, remote_path)
-        return f"generation {generation}: file non trovato"
+    all_dosages = {}  # label -> {sample_id: dosage}
+    labels_not_found = []
+    samples_by_chrom = {}
 
-    path = ensure_local_copy(remote_path, LOCAL_CACHE_DIR)
+    for chrom, group in variants_df.groupby("chrom"):
+        vcf_path = vcf_path_for(generation, chrom)
+        if not os.path.exists(vcf_path):
+            log.warning("  VCF non trovato per generazione %d, chr%s: %s", generation, chrom, vcf_path)
+            labels_not_found.extend(group["label"].tolist())
+            continue
 
-    t0 = time.perf_counter()
-    with open(path, "r") as f:
-        header_line = f.readline()
-    header = header_line.rstrip("\n").split(",")
-    log.info("  header letto (%d colonne totali) in %.1fs", len(header), time.perf_counter() - t0)
+        chrom_name = resolve_chrom_name(str(chrom), vcf_path)
+        samples = get_samples(vcf_path)
+        samples_by_chrom[chrom] = samples
 
-    id_col = load_id_col(header)
-    id_col_pos = header.index(id_col) + 1  # awk è 1-based
+        positions = group["pos"].tolist()
+        t0 = time.perf_counter()
+        rows = query_positions(vcf_path, chrom_name, positions)
+        log.info("  chr%s: %d varianti richieste, %d righe trovate nel VCF (%.2fs)",
+                  chrom, len(positions), len(rows), time.perf_counter() - t0)
 
-    present = [v for v in variant_labels if v in header]
-    missing = [v for v in variant_labels if v not in header]
-    if missing:
-        log.warning("Coorte %d: %d varianti non trovate nel file:", generation, len(missing))
-        for m in missing:
-            log.warning("     - %s", m)
+        # indicizza le righe trovate per posizione (potrebbero essercene piu' di
+        # una per posizione in caso di siti multiallelici non normalizzati)
+        rows_by_pos = defaultdict(list)
+        for line in rows:
+            pos_found = int(line.split("\t")[1])
+            rows_by_pos[pos_found].append(line)
 
-    if not present:
-        log.error("Coorte %d: nessuna variante significativa presente nel file.", generation)
-        return f"generation {generation}: nessuna variante trovata"
+        for _, variant in group.iterrows():
+            label = variant["label"]
+            pos = variant["pos"]
+            ref = variant["ref"]
+            alt = variant["alt"]
 
-    log.info("  %d/%d varianti presenti nel file per questa coorte", len(present), len(variant_labels))
+            candidate_rows = rows_by_pos.get(pos, [])
+            dosages = None
+            for line in candidate_rows:
+                dosages = parse_gt_row(line, ref, alt)
+                if dosages is not None:
+                    break
 
-    wanted_positions = [header.index(v) + 1 for v in present]
+            if dosages is None:
+                if candidate_rows:
+                    log.warning(
+                        "  [MISMATCH] %s: trovata posizione ma REF/ALT non corrispondono "
+                        "(atteso %s>%s). Riga/e nel VCF: %s",
+                        label, ref, alt, candidate_rows,
+                    )
+                labels_not_found.append(label)
+                continue
 
-    os.makedirs(tmp_dir, exist_ok=True)
-    tmp_out = os.path.join(tmp_dir, f"gen{generation}_filtered.csv")
+            all_dosages[label] = dict(zip(samples, dosages))
 
-    extract_columns_parallel(path, id_col_pos, wanted_positions, tmp_out, tmp_dir)
+    if not all_dosages:
+        log.error("Generazione %d: nessuna variante estratta.", generation)
+        return pd.DataFrame(), labels_not_found
 
-    t0 = time.perf_counter()
-    filtered_col_names = ["id"] + present
-    df = pd.read_csv(tmp_out, header=None, names=filtered_col_names, dtype=str)
-    df = df.set_index("id")
-    log.info("  file filtrato letto in pandas (%d pazienti) in %.1fs", len(df), time.perf_counter() - t0)
-
-    t0 = time.perf_counter()
+    df = pd.DataFrame(all_dosages)  # indice = sample id (union implicita), colonne = varianti trovate
     df_bin = binarize_vectorized(df)
-    log.info("  binarizzazione completata in %.1fs", time.perf_counter() - t0)
 
-    out_path = os.path.join(out_dir, f"cohort{generation}_significant_variants.csv")
-    df_bin.to_csv(out_path)
-
-    os.remove(tmp_out)
-
-    msg = f"Coorte {generation}: {out_path}  ({len(df_bin)} pazienti, {df_bin.shape[1]} varianti)"
-    log.info("  -> %s", msg)
-    log.info("=== Coorte %d: completata in %.1fs totali ===", generation, time.perf_counter() - t_start)
-    return msg
+    log.info("=== Generazione %d: completata in %.1fs (%d pazienti, %d varianti trovate) ===",
+              generation, time.perf_counter() - t_start, len(df_bin), df_bin.shape[1])
+    return df_bin, labels_not_found
 
 
 def main():
-    log.info("=== Recupero varianti significative (entrambe le coorti) dal DB ===")
+    log.info("=== Recupero varianti significative dal DB ===")
     t_total = time.perf_counter()
+
     sig = get_significant_results()
     if sig.empty:
-        log.info("Nessuna variante significativa trovata in entrambe le coorti. Esco.")
+        log.info("Nessuna variante significativa trovata. Esco.")
         return
 
+    sig["ref"] = sig["mutation"].apply(lambda m: m.split("_", 1)[0])
+    sig["alt"] = sig["mutation"].apply(lambda m: m.split("_", 1)[1])
+    sig["chrom"] = sig["chromosome"].astype(str)
+    sig["pos"] = sig["position"].astype(int)
     sig["label"] = sig.apply(
         lambda r: build_variant_label(r["chromosome"], r["position"], r["mutation"]), axis=1
     )
-    unique_labels = sorted(sig["label"].unique())
-    log.info("%d varianti uniche da estrarre.", len(unique_labels))
+    variants_df = sig[["chrom", "pos", "ref", "alt", "label"]].drop_duplicates(subset="label")
+    log.info("%d varianti uniche da estrarre.", len(variants_df))
 
     os.makedirs(OUT_DIR, exist_ok=True)
-    os.makedirs(TMP_DIR, exist_ok=True)
 
-    # Le due coorti vengono processate in sequenza; il parallelismo (N_WORKERS
-    # processi awk) e' interno a ciascuna coorte, sui chunk di righe del file,
-    # per evitare di dividere gli stessi core della macchina su 2 pool
-    # concorrenti da N_WORKERS ciascuno (2 x N_WORKERS processi contemporanei
-    # saturerebbero comunque la CPU/il disco senza guadagno aggiuntivo).
-    for gen in (1, 2):
-        try:
-            extract_cohort(gen, unique_labels, OUT_DIR, TMP_DIR)
-        except Exception as e:
-            log.error("Coorte %d fallita: %s", gen, e)
+    all_variant_labels = sorted(variants_df["label"].unique())
+    combined_parts = []
 
+    for gen in (1, 2, 3):
+        df_bin, not_found = extract_generation(gen, variants_df)
+        if not_found:
+            log.warning("Generazione %d: %d/%d varianti non trovate/non estratte: %s",
+                        gen, len(not_found), len(all_variant_labels), not_found)
+
+        if df_bin.empty:
+            continue
+
+        # riallinea alle 34 varianti totali (colonne mancanti -> NaN), cosi'
+        # il file combinato ha sempre lo stesso schema di colonne per ogni coorte
+        df_bin = df_bin.reindex(columns=all_variant_labels)
+
+        # id prefissato per coorte + colonna generation esplicita
+        df_bin.index = [f"gen{gen}_{sample_id}" for sample_id in df_bin.index]
+        df_bin.index.name = "id"
+        df_bin.insert(0, "generation", gen)
+
+        combined_parts.append(df_bin)
+
+    if not combined_parts:
+        log.error("Nessuna generazione ha prodotto dati. Esco senza scrivere output.")
+        return
+
+    combined = pd.concat(combined_parts, axis=0)
+
+    out_path = os.path.join(OUT_DIR, "combined_significant_variants.csv")
+    combined.to_csv(out_path)
+
+    log.info("-> Scritto %s (%d pazienti totali, %d varianti, coorti: %s)",
+              out_path, len(combined), len(all_variant_labels),
+              combined["generation"].value_counts().to_dict())
     log.info("=== Fatto in %.1fs totali ===", time.perf_counter() - t_total)
 
 
