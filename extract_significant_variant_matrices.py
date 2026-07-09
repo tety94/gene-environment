@@ -27,6 +27,7 @@ Usage: python extract_significant_variant_matrices.py
 import os
 import glob
 import time
+import shutil
 import logging
 import subprocess
 import numpy as np
@@ -49,6 +50,10 @@ GENOTYPE_FILES = {
 }
 OUT_DIR = "/srv/python-projects/gene-environment/significant_variant_matrices"
 TMP_DIR = "/tmp/significant_variant_extract"
+# cache locale: il file remoto (su mount di rete lento) viene copiato qui UNA
+# SOLA VOLTA; le run successive (anche per varianti diverse) riusano la copia
+# locale invece di ripagare il costo di rete ogni volta.
+LOCAL_CACHE_DIR = "/srv/python-projects/gene-environment/_local_cache"
 N_WORKERS = os.cpu_count() or 4  # numero di chunk di righe in cui dividere ciascun file
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -56,6 +61,57 @@ N_WORKERS = os.cpu_count() or 4  # numero di chunk di righe in cui dividere cias
 def build_variant_label(chromosome, position, mutation):
     return f"{chromosome}_{position}_{mutation}"
 
+
+def ensure_local_copy(remote_path, cache_dir):
+    """
+    Copia remote_path in cache_dir UNA SOLA VOLTA (se non gia' presente) e
+    ritorna il path locale. Pensato per file enormi su mount di rete lenti:
+    invece di ripetere letture (parziali o casuali) sul mount remoto ad ogni
+    fase (header, split, chunk) e ad ogni run, si paga il costo di rete una
+    volta sola con una copia sequenziale, poi tutto il resto lavora su disco
+    locale (piu' veloce, niente contesa con letture parallele sullo stesso
+    mount remoto).
+
+    Usa rsync --partial cosi' se la copia si interrompe a meta' (file enorme,
+    run lunga) puo' riprendere da dove si era fermata invece di ripartire da
+    zero.
+    """
+    os.makedirs(cache_dir, exist_ok=True)
+    local_path = os.path.join(cache_dir, os.path.basename(remote_path))
+
+    if os.path.exists(local_path):
+        remote_size = os.path.getsize(remote_path)
+        local_size = os.path.getsize(local_path)
+        if local_size == remote_size:
+            log.info("copia locale gia' presente e completa: %s (salto il trasferimento)", local_path)
+            return local_path
+        else:
+            log.info(
+                "copia locale presente ma incompleta (%d/%d byte), riprendo il trasferimento",
+                local_size, remote_size,
+            )
+
+    remote_size = os.path.getsize(remote_path)
+    free_space = shutil.disk_usage(cache_dir).free
+    if free_space < remote_size:
+        raise RuntimeError(
+            f"Spazio insufficiente in {cache_dir}: servono {remote_size / 1e9:.1f} GB, "
+            f"disponibili {free_space / 1e9:.1f} GB"
+        )
+
+    log.info(
+        "copia locale non trovata (o incompleta), copio una volta sola da %s (%.1f GB)",
+        remote_path, remote_size / 1e9,
+    )
+    t0 = time.perf_counter()
+    subprocess.run(
+        ["rsync", "-ah", "--partial", "--inplace", remote_path, local_path],
+        check=True,
+    )
+    elapsed = time.perf_counter() - t0
+    log.info("copia locale completata in %.1fs (%.1f MB/s) -> %s",
+              elapsed, remote_size / 1e6 / max(elapsed, 0.001), local_path)
+    return local_path
 
 def load_id_col(header):
     """Trova la colonna id, gestendo il rename IID -> id fatto da data_loader.py."""
@@ -120,7 +176,14 @@ def extract_columns_parallel(path, id_col_pos, wanted_positions, tmp_out, tmp_di
 
     t0 = time.perf_counter()
     skip = "tail -n +2" if has_header else "cat"
-    split_cmd = f"{skip} {path} | split -n l/{n_workers} -d -a 3 - {chunk_prefix}"
+    # r/N (round-robin) invece di l/N: l/N richiede di conoscere la dimensione
+    # totale dell'input per calcolare i tagli, quindi fallisce su una pipe
+    # ("cannot determine file size"). r/N distribuisce le righe una alla volta
+    # tra gli N chunk in streaming, senza bisogno di conoscere la dimensione in
+    # anticipo. Effetto collaterale: l'ordine dei pazienti nel file finale non
+    # coincide con l'ordine originale (sono comunque indicizzati per id, quindi
+    # non e' un problema salvo che codice a valle assuma un ordine posizionale).
+    split_cmd = f"{skip} {path} | split -n r/{n_workers} -d -a 3 - {chunk_prefix}"
     subprocess.run(split_cmd, shell=True, check=True)
     log.info("  split in chunk completato in %.1fs", time.perf_counter() - t0)
 
@@ -166,13 +229,17 @@ def extract_cohort(generation, variant_labels, out_dir, tmp_dir):
     t_start = time.perf_counter()
     log.info("=== Coorte %d: inizio ===", generation)
 
-    path = GENOTYPE_FILES[generation]
-    if not os.path.exists(path):
-        log.warning("File non trovato per generation %d: %s", generation, path)
+    remote_path = GENOTYPE_FILES[generation]
+    if not os.path.exists(remote_path):
+        log.warning("File non trovato per generation %d: %s", generation, remote_path)
         return f"generation {generation}: file non trovato"
 
+    path = ensure_local_copy(remote_path, LOCAL_CACHE_DIR)
+
     t0 = time.perf_counter()
-    header = pd.read_csv(path, nrows=0).columns.tolist()
+    with open(path, "r") as f:
+        header_line = f.readline()
+    header = header_line.rstrip("\n").split(",")
     log.info("  header letto (%d colonne totali) in %.1fs", len(header), time.perf_counter() - t0)
 
     id_col = load_id_col(header)
