@@ -77,11 +77,25 @@ def load_genotype_matrix_for_cohort(cohort):
         return None
 
     prefix = f"gen{cohort}_"
-    df_cohort.index = [
-        idx[len(prefix):] if idx.startswith(prefix) else idx
-        for idx in df_cohort.index
-    ]
+
+    def clean_id(idx):
+        # rimuove il prefisso "genN_"
+        raw = idx[len(prefix):] if idx.startswith(prefix) else idx
+        # rimuove la duplicazione "XXX_XXX" -> "XXX" (visto nei dati: es.
+        # "RES02977_RES02977"), preservando id che contengono legittimamente
+        # underscore ma non sono duplicati
+        parts = raw.split("_")
+        if len(parts) == 2 and parts[0] == parts[1]:
+            return parts[0]
+        return raw
+
+    original_index = list(df_cohort.index)
+    df_cohort.index = [clean_id(idx) for idx in original_index]
     df_cohort.index.name = "id"
+
+    n_dup_cleaned = sum(1 for i in original_index if i != clean_id(i))
+    print(f"[INFO] Coorte {cohort}: {n_dup_cleaned}/{len(original_index)} id ripuliti da prefisso/duplicazione")
+
     return df_cohort
 
 
